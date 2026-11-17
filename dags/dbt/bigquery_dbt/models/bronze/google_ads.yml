@@ -1,0 +1,47 @@
+version: 2
+
+sources:
+  - name: bronze_google_ads
+    database: "{{ target.project }}"
+    schema: google_ads
+
+    tables:
+      - name: ads_CampaignBasicStats_2747379648
+        description: >
+          Per-campaign, per-day cost/click/impression stats for the single Ads manager account
+          (2747379648), covering all 10 sub-account customers via the customer_id column -- no
+          per-account table union needed, unlike GA4. Segmented by device/network/slot and
+          snapshotted by _DATA_DATE, so downstream models must dedup to the latest snapshot per
+          (campaign_id, segments_date) before summing across segments to get a true campaign x day
+          total (the original EDA prototype this reconciliation supersedes did not do this).
+        columns:
+          - name: campaign_id
+            description: "INT64 -- must be cast to STRING to join against GA4's string-extracted campaign_id."
+          - name: customer_id
+            description: "Discriminates the 10 sub-account customers sharing this one table."
+
+      - name: ads_Campaign_2747379648
+        description: "Campaign metadata (name, status, etc.), snapshotted by _DATA_DATE."
+
+      - name: ads_Customer_2747379648
+        description: >
+          Reference data for the 10 sub-account customers: descriptive name and native billing
+          currency_code. 2 of 10 are CAD (Online QR Generator, Tracelo); the rest are USD. GA4
+          revenue is always USD -- flag a currency mismatch rather than converting FX.
+
+      - name: ads_LandingPageStats_2747379648
+        description: >
+          Ad-group-level cost, segmented by actual landing page URL (landing_page_view_
+          unexpanded_final_url) -- unlike ads_CampaignBasicStats, this lets spend be split by
+          destination domain/project, not just campaign. Confirmed empirically: campaign_name
+          is NOT unique, not even within one customer_id (the same name is reused across
+          different campaign_ids, e.g. paused-and-recreated campaigns) -- never join this to
+          ads_Campaign on campaign_name alone, it will fan out. Use the domain extracted from
+          the landing page URL directly instead (see int_ads_landing_page_day_cost.sql).
+          Snapshotted by _DATA_DATE like ads_CampaignBasicStats; dedup to the latest snapshot
+          per natural key before summing.
+        columns:
+          - name: customer_id
+            description: "Discriminates the 10 sub-account customers sharing this one table."
+          - name: landing_page_view_unexpanded_final_url
+            description: "The actual destination URL an ad's clicks landed on. Domain maps to seed_ga4_payment_account_map.product_name (dim_project.domain)."

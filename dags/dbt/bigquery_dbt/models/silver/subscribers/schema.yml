@@ -1,0 +1,48 @@
+version: 2
+
+models:
+
+  - name: int_combined_subscribers_params
+    description: "One row of coverage dates shared by the combined_subscribers models."
+
+  - name: int_combined_subscribers_paid_runs
+    description: >
+      Combined Stripe + Solidgate paid runs (paid-day gaps <= 15 days bridged).
+      Grain: product_name x subscriber_key x run_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [product_name, subscriber_key, run_id]
+
+  - name: int_combined_subscribers_mrr_daily
+    description: >
+      Combined MRR totals per product x day, plus per-subscriber MRR for first-run starts
+      (first_run_starts). Grain: product_name x snapshot_date.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [product_name, snapshot_date]
+
+  - name: int_combined_subscribers_solidgate_free_daily
+    description: "Baseline historical Solidgate free stock (paid wins). Grain: product_name x snapshot_date."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [product_name, snapshot_date]
+
+  - name: int_combined_subscribers_free_daily
+    description: >
+      Corrected combined free / past-due-free-only counts over Stripe + Solidgate history
+      coverage; overrides the baseline free/all in int_combined_subscribers_daily.
+      Grain: product_name x snapshot_date.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [product_name, snapshot_date]
+
+  - name: int_combined_subscribers_daily
+    description: "Combined subscriber metrics per product x day. Grain: product_name x snapshot_date."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [product_name, snapshot_date]

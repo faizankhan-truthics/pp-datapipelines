@@ -1,0 +1,193 @@
+version: 2
+
+models:
+  - name: project_roas_daily
+    description: >
+      Project-grain companion to ga4_ads_reconciliation/campaign_roas_daily, built to answer
+      "connect Project & Funnel with campaign-level Spend, Revenue, and Sessions" -- those two
+      are campaign_id-keyed with no reliable project split for spend (a campaign isn't scoped
+      to one landing page). Spend here comes from int_ads_landing_page_day_cost (split by
+      destination domain instead); sessions/ga4_revenue_usd are summed up from
+      int_ga4_campaign_day_metrics's existing property_id x campaign_id x date grain.
+
+      ga4_revenue_usd is GA4's own event_value (a proxy), same caveat as
+      ga4_ads_reconciliation -- NOT real payment-processor revenue. real_revenue_usd is real
+      Solidgate/Stripe revenue from ga4_payment_match_campaign_daily, summed to project x date --
+      covers 5 of 7 projects (location_tool, infochecker, iq_center, publicregistry, reversly,
+      via seed_ga4_payment_account_map), confirmed directly against that seed rather than an
+      earlier 3-of-7 estimate. Same exact-transaction-match caveat as
+      ga4_payment_match_campaign_daily -- subscription renewals with no matching GA4 transaction
+      aren't attributed, so real_revenue_usd understates true revenue.
+
+      Covers all 7 projects for spend (tracelo and fitday have real Ads spend despite no GA4
+      data); sessions/ga4_revenue are null for those two, same has_ga4_export limitation as
+      every other model in this work.
+
+      ga4_revenue_usd is null far more often than the has_ga4_export gap alone would suggest:
+      confirmed (sandbox and prod both) that infochecker, iq_center, and reversly have ZERO
+      non-null ga4_revenue_usd rows in int_ga4_campaign_day_metrics across their entire history,
+      despite having GA4 export and partial sessions data -- likely the same
+      ~20%-Google-Ads-attributable effect documented on ga4_ads_reconciliation, just landing at
+      0% for these three specifically. Only location_tool and public_registry ever have non-null
+      revenue, and even those are null ~70-85% of days. In practice, expect blank
+      ga4_revenue_usd/roas_usd on most rows for 5 of the 7 projects, not just tracelo/fitday.
+
+      Grain: project_name x date.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - project_name
+              - date
+    columns:
+      - name: project_name
+        data_tests:
+          - not_null
+      - name: ga4_property_name
+        description: "Join key to dim_project / int_ga4_funnel_sessions."
+      - name: date
+        data_tests:
+          - not_null
+      - name: ads_cost_usd
+        description: "Ad spend for this project/day, converted to USD per Ads sub-account before summing across them (see model description) -- the only safe way to total spend when a project spans multiple sub-accounts."
+      - name: spans_multiple_currencies
+        description: "True if this project/day's spend came from Ads sub-accounts billing in more than one currency. False for every project today (confirmed: the only non-USD sub-account among our 7 projects is Tracelo/CAD, and it doesn't share a domain with any other currency) -- kept as an explicit flag so a future mixed-currency project doesn't go unnoticed."
+      - name: ga4_revenue_usd
+        description: "GA4's own event_value proxy, summed across campaigns for this property/day. NOT real revenue -- see model description."
+      - name: sessions
+        description: "Distinct sessions attributed to a campaign for this property/day, summed across campaigns."
+      - name: new_users
+        description: "Distinct first_visit users attributed to a campaign for this property/day, summed across campaigns."
+      - name: roas_usd
+        description: "ga4_revenue_usd / ads_cost_usd. Proxy ROAS, not real-revenue ROAS -- same caveat as ga4_revenue_usd."
+      - name: real_revenue_usd
+        description: "Real Solidgate/Stripe revenue for this project/day, from ga4_payment_match_campaign_daily (exact-transaction match only, no subscription-renewal fallback -- see that model's docs). Null for tracelo/fitday (not in seed_ga4_payment_account_map) and for any project/day with no matched transaction."
+      - name: real_txn_cnt
+        description: "Count of matched transactions behind real_revenue_usd."
+      - name: real_roas_usd
+        description: "real_revenue_usd / ads_cost_usd. The real-money ROAS figure -- prefer this over roas_usd when it's non-null."
+
+  - name: ga4_ads_reconciliation
+    description: >
+      GA4 <-> Google Ads reconciliation at campaign_id x day grain, across all products.
+      Intermediary step toward the full Ads -> GA4 -> payment-processor funnel (Wally/Waleed owns
+      the GA4<->Solidgate/Stripe transaction stitch and MRR calc -- see int_ga4_transactions,
+      ga4_payment_match_daily, stripe/solidgate_mrr_usd_daily). FULL OUTER JOIN, so campaigns with
+      revenue-but-no-spend and spend-but-no-revenue both appear.
+
+    columns:
+      - name: date
+      - name: campaign_id
+        description: "Google Ads campaign id. Globally unique, so no property<->account mapping is needed for the join."
+      - name: campaign_name
+      - name: property_id
+        description: "GA4 property id (null if this campaign/day only has Ads spend, no GA4 match)."
+      - name: customer_id
+        description: "Ads sub-account customer id (null if this campaign/day only has GA4 revenue, no Ads match)."
+      - name: customer_descriptive_name
+      - name: ga4_revenue_usd
+        description: "Attributable purchase revenue (campaign_id + gclid both resolved). Expect ~20% of total purchase revenue to be attributable -- the rest is legitimately non-Google-Ads traffic (confirmed via source/medium breakdown: direct/no-referrer, QR-code scans, Bing Ads, organic search)."
+      - name: sessions
+      - name: new_users
+      - name: ads_cost
+        description: "Native currency -- see ads_currency_code."
+      - name: ads_currency_code
+        description: "Defaults to USD when there's no Ads-side match."
+      - name: currency_mismatch_flag
+        description: "True when ads_currency_code != USD (Online QR Generator, Tracelo bill in CAD). False, never null, on GA4-only rows with no Ads match -- mirrors ads_currency_code's USD default."
+      - name: roas
+        description: "ga4_revenue_usd / ads_cost. Null when either side is missing. Native currency -- don't sum/compare across currencies, use roas_usd instead."
+      - name: ads_cost_usd
+        description: "ads_cost converted to USD via int_currency_conversion (asof rate, falling back to the latest known rate). USD rows pass through as-is. Use this (not ads_cost) whenever blending totals across currencies -- e.g. Looker Studio scorecards."
+      - name: roas_usd
+        description: "ga4_revenue_usd / ads_cost_usd. Safe to sum/compare across currencies, unlike roas."
+
+  - name: campaign_roas_daily
+    description: >
+      Campaign-level ROAS against REAL collected Solidgate/Stripe revenue, at campaign_id x day
+      grain, as opposed to ga4_ads_reconciliation's ga4_revenue_usd (GA4's own event_value, a
+      proxy). Revenue comes from ga4_payment_match_campaign_daily -- see that model's docs for why
+      this understates true revenue (exact-transaction match only, no subscription-renewal
+      fallback). FULL OUTER JOIN against Ads spend, same rationale as ga4_ads_reconciliation.
+
+    columns:
+      - name: date
+      - name: campaign_id
+        description: "Google Ads campaign id. Globally unique, so no property<->account mapping is needed for the join."
+      - name: campaign_name
+      - name: customer_id
+        description: "Ads sub-account customer id (null if this campaign/day only has payment revenue, no Ads match)."
+      - name: customer_descriptive_name
+      - name: revenue_usd
+        description: "Real Solidgate/Stripe revenue attributed to this campaign_id/day (null if this campaign/day only has Ads spend, no matched payment)."
+      - name: txn_cnt
+        description: "Count of matched transactions (successful or not) behind revenue_usd -- see ga4_payment_match_campaign_daily."
+      - name: ads_cost
+        description: "Native currency -- see ads_currency_code."
+      - name: ads_currency_code
+        description: "Defaults to USD when there's no Ads-side match."
+      - name: ads_cost_usd
+        description: "ads_cost converted to USD via int_currency_conversion (asof rate, falling back to the latest known rate). USD rows pass through as-is."
+      - name: roas
+        description: "revenue_usd / ads_cost_usd. Null when either side is missing. revenue_usd is already USD, so unlike ga4_ads_reconciliation there's only one roas column."
+
+  - name: project_funnel_spend_daily
+    description: >
+      Ads spend and GA4 sessions by Project x URL-based Funnel x date. Funnel here is the landing
+      page's product/topic slug (walking, phone-lookup, adhd, track, ...) per Manya's URL sheet --
+      NOT a post-click funnel stage (Search->Paywall etc.). Unlike that, this one is derivable from the ad data, so spend splits cleanly (all 7 projects, Tracelo
+      and Fitday included). Sessions come from int_ga4_funnel_sessions (5 has_ga4_export projects
+      only) and are resolved independently of spend, so a row can have one side null -- treat
+      that as a mapping gap to investigate, not zero. Revenue/ROAS deliberately not carried: no
+      user-level bridge exists to attribute real revenue to a landing funnel.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [project_name, funnel, date]
+
+    columns:
+      - name: project_name
+        tests:
+          - not_null
+      - name: ga4_property_name
+        description: "Null for projects with no GA4 export when the row is spend-only (Tracelo, Fitday) -- use project_name as the key."
+      - name: funnel
+        description: "Landing-page URL slug (lower-case). '(root)' for slug-less URLs. 'unresolved' for GA4 sessions that never fired a funnel signal (sessions only, no spend). calisthenics-m / calisthenics-f are distinct until Manya confirms which is canonical."
+        tests:
+          - not_null
+      - name: date
+        tests:
+          - not_null
+      - name: ads_cost_usd
+        description: "Ads spend converted to USD per customer_id before summing. Null when the funnel only has sessions."
+      - name: sessions
+        description: "All GA4 sessions entering via this funnel, including funnel = 'unresolved' (sessions with no funnel signal). Null for non-GA4-export projects or spend-only rows."
+      - name: ads_sessions
+        description: "Subset of sessions carrying a gclid -- the fairer denominator against ads_cost_usd."
+
+  - name: dim_campaign_project
+    description: >
+      campaign_id -> project_name bridge (one row per campaign_id) for mapping campaigns and
+      dim_user.campaign_id to a Project. Built from the Ads landing-page domain, extended with
+      campaigns that have no Ads record but whose first-time payers all belong to one project's
+      payment account. Non-project products are absent (null project on join). See the model
+      header for the validation behind it.
+    columns:
+      - name: campaign_id
+        description: Google Ads campaign id as a string (matches dim_user.campaign_id).
+        tests:
+          - unique
+          - not_null
+      - name: project_name
+        description: Project (dim_project.project_name) the campaign sends traffic to / belongs to.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_project')
+              field: project_name
+      - name: mapping_source
+        description: How the project was derived - ads_landing_page or purchaser_payment_account.
+        tests:
+          - accepted_values:
+              values: ['ads_landing_page', 'purchaser_payment_account']

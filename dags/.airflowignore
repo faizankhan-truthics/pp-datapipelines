@@ -1,0 +1,4 @@
+# Regex (one per line) of paths under dags/ the scheduler must NOT parse as DAGs.
+# Only the *_dag.py files are DAGs; tasks/ and schemas/ are imported, not scanned.
+/tasks/
+/schemas/

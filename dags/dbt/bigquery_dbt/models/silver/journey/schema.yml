@@ -1,0 +1,295 @@
+version: 2
+
+# Silver layer of the user journey mart (docs/plans/user_journey_mart.md). Driven by
+# seeds/seed_product_registry.csv; measured link rates in docs/plans/user_journey_stitch_checks.sql.
+
+models:
+
+  - name: int_amplitude_events
+    description: >
+      Slim, deduped Amplitude events for every in-scope registry product, with identity, stage and
+      first-touch fields. Increments by server_upload_time and merges on uuid. event_ts is the
+      device clock unless it is more than amplitude_max_clock_skew_hours from the server receive
+      time (device clocks range from 1978 to 2042 in the raw table). Purchase-event emails are kept
+      only as email_user_key (md5). Grain: one row per Amplitude event.
+    columns:
+      - name: event_uuid
+        description: Amplitude `uuid`.
+        data_tests:
+          - unique
+          - not_null
+      - name: product
+        description: Registry product.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_product_registry')
+                field: product
+      - name: event_ts
+        description: Event time, corrected for broken device clocks.
+        data_tests:
+          - not_null
+      - name: event_date
+        description: "`date(event_ts)`; partition column."
+      - name: is_server_event
+        description: "`platform = 'node'`: events sent by the backend (subscription_*). Never used for device links."
+      - name: amplitude_id
+        description: Amplitude visitor id, resolved to the merged id from MERGE_USERS_<project> (same id Amplitude counts users by).
+      - name: device_id
+        description: Device id; null on server events.
+      - name: app_user_id
+        description: The app's account id (Amplitude user_id). The hub of the identity resolution.
+      - name: order_id
+        description: Solidgate order id on server subscription events (link E3).
+      - name: email_user_key
+        description: md5 of the buyer's email on purchase events (link E6); same key as int_identity_user_map.user_key.
+      - name: experiment_flag_key
+        description: Experiment flag key (`[Experiment] Flag Key`); only on `[Experiment] Exposure` events. Null on rows loaded before the column existed until a full refresh.
+      - name: experiment_variant
+        description: Variant the user was exposed to (`[Experiment] Variant`, lowercased, e.g. control, b, c); only on `[Experiment] Exposure` events.
+      - name: landing_tool
+        description: Landing page the user came in through (`tool` from user or event properties, e.g. video-gen_generic). Filled on about 98% of signup, trial and conversion events.
+
+  - name: int_ga4_journey_events
+    description: >
+      Session starts, signups and checkout events of every in-scope registry product with a GA4
+      export. Checkout events carry transaction_id = Solidgate order_id (link E7+). Long-term GA4
+      history for the mart (full_refresh=false). Email / name / postal params are never read.
+      Grain: one row per kept GA4 event.
+    columns:
+      - name: product
+        data_tests:
+          - not_null
+      - name: user_pseudo_id
+        description: GA4 client id.
+        data_tests:
+          - not_null
+      - name: journey_event_kind
+        description: "`session_start`, `signup` or `checkout`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['session_start', 'signup', 'checkout']
+      - name: transaction_id
+        description: Payment id on checkout events only -- a Solidgate order id (E7+) or a Stripe payment_intent (E7s).
+
+  - name: int_ga4_user_touchpoints
+    description: >
+      One row per GA4 visitor per product: first / last seen, first session touch, first signup,
+      every click id seen (the GA4 side of link E14). Grain: product x user_pseudo_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - user_pseudo_id
+
+  - name: int_anytrack_events
+    description: >
+      AnyTrack events with an email (signups, trials, purchases) of every registry product, with the
+      md5 email key (E17) and AnyTrack's first touch of the visitor (main_attribution). Grain: one row
+      per AnyTrack event.
+    columns:
+      - name: anytrack_event_key
+        data_tests:
+          - unique
+          - not_null
+      - name: product
+        data_tests:
+          - not_null
+      - name: email_user_key
+        description: md5 of the lowercased, trimmed email -- the user_key of int_identity_user_map.
+        data_tests:
+          - not_null
+      - name: touch_ts
+        description: Time of the visitor's first touch (main_attribution.time).
+      - name: ad_network
+        description: ValueTrack network of the first touch (params.network); placeholders are null.
+
+  - name: int_identity_edges
+    description: >
+      Every observed link between two identifiers of a product (the stitch map, plan section 3):
+      E1, E2, E3, E5, E5o, E6, E7+, E9, E9u, E12, E12p, E14, E15, E16. Customers are '<account>:<customer id>', emails are
+      md5. Grain: product x id_type_a x id_a x id_type_b x id_b x evidence.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - id_type_a
+              - id_a
+              - id_type_b
+              - id_b
+              - evidence
+    columns:
+      - name: evidence
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - E1_amplitude_event
+                  - E2_amplitude_event
+                  - E3_order_id
+                  - E3_customer_account_id
+                  - E5_payer_email
+                  - E5_order_email
+                  - E6_amplitude_email
+                  - E7_checkout_order_id
+                  - E7_checkout_payment_intent
+                  - E7_checkout_routed_payment
+                  - E9_mc_customer_id
+                  - E12_mc_first_order_id
+                  - E12_provider_payment_id
+                  - E14_gclid
+                  - E15_ga4_user_id
+                  - E9_mc_user_id
+                  - E16_amplitude_site_user_id
+                  - E17_anytrack_email
+                  - E18_anytrack_signup_user_id
+
+  - name: int_identity_resolution
+    description: >
+      One user_key per identifier (plan section 7). The app account id is the hub; other ids
+      attach by a fixed rule order, recorded in link_path. Ids pointing at more than one user are
+      left out (see int_identity_suppressed_ids). user_key is not stable across identity changes:
+      never store it outside dbt. Grain: product x id_type x id_value.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - id_type
+              - id_value
+    columns:
+      - name: id_type
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - app_user_id
+                  - amplitude_id
+                  - device_id
+                  - email
+                  - solidgate_customer
+                  - stripe_customer
+                  - ga4_pseudo_id
+                  - site_user_id
+                  - anytrack_click_id
+      - name: id_value
+        data_tests:
+          - not_null
+      - name: user_key
+        description: md5 of product + anchor type + anchor id.
+        data_tests:
+          - not_null
+      - name: anchor_type
+        description: What the user is anchored on.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['app_user', 'payment_email', 'signup_email', 'payment_customer', 'visitor']
+      - name: link_path
+        description: >
+          How this id reached its user: hub, app_user_alias (a backend-only app id joined to the
+          web account that paid for the same customer), E1, E2, E6, anonymous, payer_email, order, email,
+          payment_metadata, solidgate_first_order, stripe_metadata (a Solidgate customer taking the
+          app user its Stripe customer's payment metadata names), customer (an email taking the
+          app user all its customers resolved to), unlinked, and for GA4 visitors any `+`-joined
+          combination of checkout_order, click_id and user_id. site_user_id: E16 or site_user_id
+          (the id is itself an app user id).
+      - name: identity_confidence
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['high', 'medium', 'none']
+
+  - name: int_identity_suppressed_ids
+    description: >
+      Ids with more than one counterpart (shared device, reused email, test account). reason =
+      shared (2 .. identity_max_fanout) or super_node (more). Grain: product x id_type x id_value x
+      counterpart_type.
+
+  - name: int_user_touch_candidates
+    description: >
+      First-touch candidates per user: Amplitude initial_* per amplitude_id, the first session of
+      each linked GA4 visitor, AnyTrack's first touch of each linked AnyTrack visitor, and the
+      GA4-based customer attribution of each linked payer, with the evidence the KR2 rules read
+      (normalised source / medium, click-id platforms, referrer class, ad network) and the
+      resolution method (click_id, utm, referrer, anytrack, signup_capture, none).
+      Grain: product x user_key x touch_system x touch_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - user_key
+              - touch_system
+              - touch_id
+    columns:
+      - name: touch_system
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['amplitude', 'ga4', 'anytrack', 'payment']
+      - name: is_touch_date_only
+        description: >
+          touch_ts is a date at midnight (payment touches): dim_user_journey orders the touch after
+          the timestamped touches of that day.
+        data_tests:
+          - not_null
+      - name: referrer_domain
+        description: >
+          The referring host; for a touch without one whose medium is `referral` and whose source is
+          a domain (GA4's convention), that domain.
+      - name: source_resolution_method
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['click_id', 'utm', 'referrer', 'anytrack', 'signup_capture', 'none']
+      - name: referrer_class
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['own', 'payment', 'oauth', 'intermediary', 'webmail', 'search', 'instagram',
+                         'ig_com_br', 'social', 'external']
+
+  - name: int_user_touch_classified
+    description: >
+      Every touch candidate with the KR2 rule it falls under (seed_kr2_channel_rules, first match in
+      check_order), its decision (ignore / skip_flag / assign) and channel_group. dim_user_journey
+      picks the journey's touch from these. Grain: as int_user_touch_candidates.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - user_key
+              - touch_system
+              - touch_id
+    columns:
+      - name: rule_id
+        description: Every touch matches exactly one rule (N17 catches the rest).
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_kr2_channel_rules')
+                field: rule_id
+      - name: decision
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ignore', 'skip_flag', 'assign']
+      - name: channel_group
+        description: Set for assign decisions only.
+      - name: fallback_channel_group
+        description: skip_flag touches only -- the channel taken when the journey has no assigned touch.
+      - name: is_source_recovered
+        description: >
+          A recover rule set the source from the click id: R01 google (missing / malformed source with
+          a Google click id), R02 bing (missing source with a Microsoft click id).

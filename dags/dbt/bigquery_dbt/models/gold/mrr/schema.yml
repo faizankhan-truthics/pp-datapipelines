@@ -1,0 +1,81 @@
+version: 2
+
+models:
+
+  - name: mrr_arr_daily
+    description: >
+      Daily combined MRR and ARR reporting mart across Solidgate and Stripe.
+      ARR is calculated as MRR multiplied by 12.
+      Grain: snapshot_date x payment_source x account_key.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - payment_source
+              - account_key
+
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+
+    columns:
+
+      - name: snapshot_date
+        description: "Date the MRR and ARR values apply to."
+        data_tests:
+          - not_null
+
+      - name: payment_source
+        description: "Payment platform providing the recurring revenue data."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - solidgate
+                  - stripe
+
+      - name: account_key
+        description: "Source-specific account identifier representing the product."
+        data_tests:
+          - not_null
+
+      - name: account_name
+        description: "Source-provided account or product name."
+
+      - name: mrr_usd
+        description: "Monthly recurring revenue in USD."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+
+      - name: arr_usd
+        description: "Annual recurring revenue in USD, calculated as MRR multiplied by 12."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+
+      - name: active_subscriptions
+        description: "Number of active subscriptions contributing to MRR."
+        data_tests:
+          - not_null
+
+      - name: customers
+        description: "Number of customers contributing to MRR."
+        data_tests:
+          - not_null
+
+      - name: currencies
+        description: "Number of currencies contributing to MRR for the account and date."

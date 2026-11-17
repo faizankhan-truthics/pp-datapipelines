@@ -1,0 +1,60 @@
+version: 2
+
+sources:
+  - name: bronze_stripe
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    config:
+      tags: [ "stripe", "bronze" ]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: stripe_balance_transactions
+        description: "Balance transactions represent funds moving through your Stripe account. Stripe creates them for every type of transaction that enters or leaves your Stripe account balance."
+      - name: stripe_payment_intents
+        description: "Table with payment intents. A PaymentIntent guides you through the process of collecting a payment from your customer. "
+      - name: stripe_charges
+        description: "Table with the Charge objects; represents a single attempt to move money into your Stripe account. PaymentIntent confirmation is the most common way to create Charges, but Account Debits may also create Charges. "
+      - name: stripe_disputes
+        description: "Table with disputes; A dispute occurs when a customer questions your charge with their card issuer. When this happens, you have the opportunity to respond to the dispute with evidence that shows that the charge is legitimate."
+      - name: stripe_early_fraud_warnings
+        description: "Table with early fraud warnings; An early fraud warning indicates that the card issuer has notified us that a charge may be fraudulent."
+      - name: stripe_refunds
+        description: "Table with refunds. Refund objects allow you to refund a previously created charge that isn’t refunded yet."
+      - name: stripe_customers
+        description: "Table with Customer objects; represents a customer of your business. Used to associate recurring charges/subscriptions and email/address details."
+      - name: stripe_products
+        description: "Table with Product objects; represents a good or service being sold, e.g. a subscription plan."
+      - name: stripe_prices
+        description: "Table with Price objects; defines the unit amount/currency/billing interval a Product is sold for."
+      - name: stripe_subscriptions
+        description: "Table with Subscription objects; represents a customer's recurring commitment to one or more Prices/Products."
+      - name: stripe_invoices
+        description: "Table with Invoice objects; a statement of amounts owed by a customer, generated for each billing period on a subscription."
+      - name: stripe_events
+        description: "Table with Event objects (/v1/events): every event type (no type filter; filter downstream on type), loaded daily in one-hour windows by dags/stripe/stripe_events_pipeline.py. Stripe keeps events for 30 days only, so this table is the long-term history. One column per top-level event key; data holds data.object (the object snapshot at event time) and, on update events, data.previous_attributes."
+      - name: stripe_accounts
+        description: >
+          Reference table containing Stripe account id and account name mapping. Table needs manual creation in the Bronze Dataset.
+        # Manually maintained reference table, not loaded on a schedule -- no _elt_update_timestamp.
+        config:
+          freshness: null
+          loaded_at_field: null
+        columns:
+          - name: account
+            description: Stripe account name.
+            tests:
+              - not_null
+              - unique
+
+          - name: id
+            description: Stripe account id.
+            tests:
+              - not_null
+              - unique
+
+          - name: product
+            description: Stripe product name.

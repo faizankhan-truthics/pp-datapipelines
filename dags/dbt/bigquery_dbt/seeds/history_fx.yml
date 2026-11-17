@@ -1,0 +1,26 @@
+version: 2
+
+seeds:
+  - name: history_fx
+    description: >
+      Reference table currency conversion to usd. Data collected from Google finance -> https://support.google.com/docs/answer/3093281?hl=en
+      Formular : =GoogleFinance("CURRENCY:MKDUSD", "price", TODAY()-3000, TODAY()) . For each currency
+      Some dates might be missing, exclude this population from the data before conversion
+    config:
+      tags: ["exchange_date", "seed", "history", "on-full-refresh"]
+
+    columns:
+      - name: date
+        description: Date of currency exchange record.
+        data_tests:
+          - not_null
+
+      - name: close
+        description: Value of currency to USD.
+        data_tests:
+          - not_null
+
+      - name: base_currency
+        description: Currency to convert to USD.
+        data_tests:
+          - not_null

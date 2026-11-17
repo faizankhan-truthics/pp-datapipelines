@@ -1,0 +1,40 @@
+version: 2
+
+seeds:
+  - name: seed_amplitude_project_map
+    description: >
+      Amplitude project id of each product, one row per product and environment (prod / stage).
+      Join key to seed_ga4_payment_account_map is ga4_property_name. The id is the suffix of the
+      native BigQuery export table `EVENTS_<id>`: prod projects export to the AIRFLOW_VAR_AMPLITUDE_DATASET
+      dataset, stage projects to AIRFLOW_VAR_AMPLITUDE_STAGE_DATASET. Products with no Amplitude
+      project have no rows here; seed_ga4_payment_account_map.amplitude_not_applicable_reason says so.
+    config:
+      tags: ["amplitude", "seed", "on-full-refresh"]
+      column_types:
+        amplitude_project_id: string
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [ga4_property_name, environment]
+
+    columns:
+      - name: ga4_property_name
+        description: "Product key; joins to seed_ga4_payment_account_map.ga4_property_name."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_ga4_payment_account_map')
+                field: ga4_property_name
+      - name: environment
+        description: "Amplitude environment of the project."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['prod', 'stage']
+      - name: amplitude_project_id
+        description: "Amplitude project id, as a string. `EVENTS_<id>` is its BigQuery export table."
+        data_tests:
+          - not_null
+          - unique

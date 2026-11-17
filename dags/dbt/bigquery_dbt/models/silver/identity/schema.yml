@@ -1,0 +1,206 @@
+version: 2
+
+models:
+
+  - name: int_identity_user_map
+    description: >
+      Cross-source identity resolution. Maps every Solidgate and Stripe customer
+      record to a single user_key, matched on lower-cased/trimmed email — the only
+      key shared across source systems today. Zendesk is not a source here (it has
+      no subscription concept of its own; see int_zendesk_refund_tickets for its
+      email field if a join is needed). Grain: source_system x source_account x
+      source_customer_id.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source_system
+              - source_account
+              - source_customer_id
+
+    columns:
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - solidgate
+                  - stripe
+
+      - name: source_account
+        description: Processing account the customer record belongs to — Solidgate `_elt_account_name` or Stripe `_elt_stripe_account_id`.
+        data_tests:
+          - not_null
+
+      - name: source_customer_id
+        description: Customer id as known to the source system (Solidgate `customer_account_id`, Stripe customer `id`). Scoped to source_account, not globally unique on its own.
+        data_tests:
+          - not_null
+
+      - name: email_raw
+        description: Email as stored by the source system, unmodified.
+
+      - name: email
+        description: Lower-cased, trimmed email used for matching. Null if the source record had no email.
+
+      - name: user_key
+        description: >
+          Deterministic identity key: to_hex(md5(email)). Two source_customer_id
+          rows (same or different source_system) with the same email resolve to the
+          same user_key. Null when email is null — that record cannot be matched to
+          anything and is excluded from dim_user.
+
+      - name: match_method
+        description: "How user_key was derived. Currently always `email` or `unmatched` — no other matching strategy exists yet."
+        data_tests:
+          - not_null
+
+  - name: int_customer_attribution
+    description: >
+      Where each customer came from, across Solidgate and Stripe, standardized onto the
+      int_identity_user_map key so it joins straight onto the user_subscription_mart. A thin
+      union of int_solidgate_customer_attribution and int_stripe_customer_attribution — the
+      attribution rule (earliest GA4-matched payment, inherited by every later renewal) lives
+      in those two models. Population is every customer that ever carried MRR; customers we
+      cannot place are kept as `unattributed` so channel totals still add up to total MRR.
+      Grain: source_system x source_account x source_customer_id.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source_system
+              - source_account
+              - source_customer_id
+
+    columns:
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - solidgate
+                  - stripe
+
+      - name: source_account
+        description: Solidgate `_elt_account_name` or Stripe `_elt_stripe_account_id`.
+        data_tests:
+          - not_null
+
+      - name: source_customer_id
+        description: Solidgate `customer_account_id` or Stripe customer id. Scoped to source_account.
+        data_tests:
+          - not_null
+
+      - name: user_key
+        description: Resolved identity from int_identity_user_map. Null when the customer record had no matchable email.
+
+      - name: source
+        description: "Where they came from, e.g. google. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: campaign
+        description: "Campaign name as tagged in GA4 (utm_campaign). `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: campaign_id
+        description: Google Ads campaign id, for joining to campaign spend. Null when unattributed or not a Google Ads click.
+
+      - name: gclid
+        description: Google Ads click id, when the matched payment happened in the same session as the click.
+
+      - name: attribution_status
+        description: "`attributed` when an earliest GA4-matched payment was found, otherwise `unattributed`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - attributed
+                  - unattributed
+
+      - name: attributed_from_subscription_id
+        description: Subscription of the payment that carried the attribution. Null when unattributed, or for a Stripe charge no subscription invoice raised.
+
+      - name: attributed_from_date
+        description: >
+          Date of the payment that carried the attribution. Well after the customer's
+          first_revenue_date means their earlier payments went unseen by GA4 — treat the
+          attribution as weaker.
+
+  - name: int_customer_revenue
+    description: >
+      Lifetime collected revenue per customer, across Solidgate and Stripe — the LTV side of
+      the attribution chain. Every successful payment counts (first purchase and renewals),
+      less refunds, in USD major units converted at the payment date's rate. Disputes and PSP
+      fees are not netted off (no customer id at that grain — see net_revenue_daily).
+      Solidgate: int_solidgate_card_orders with status approved / settle_ok / partial_settled /
+      refunded. Stripe: int_stripe_charges that succeeded and were captured.
+      Grain: source_system x source_account x source_customer_id.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source_system
+              - source_account
+              - source_customer_id
+
+    columns:
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - solidgate
+                  - stripe
+
+      - name: source_account
+        description: Solidgate `_elt_account_name` or Stripe `_elt_stripe_account_id`.
+        data_tests:
+          - not_null
+
+      - name: source_customer_id
+        description: Solidgate `customer_account_id` or Stripe customer id.
+        data_tests:
+          - not_null
+
+      - name: paid_transactions
+        description: Count of successful payments (orders / charges) that count as revenue.
+        data_tests:
+          - not_null
+
+      - name: first_payment_date
+        description: Date of the customer's first successful payment.
+
+      - name: last_payment_date
+        description: Date of the customer's most recent successful payment.
+
+      - name: lifetime_gross_revenue_usd
+        description: Sum of successful payments, USD.
+        data_tests:
+          - not_null
+
+      - name: lifetime_refunded_usd
+        description: Sum refunded against those payments, USD.
+        data_tests:
+          - not_null
+
+      - name: lifetime_revenue_usd
+        description: lifetime_gross_revenue_usd − lifetime_refunded_usd. The customer's LTV to date.
+        data_tests:
+          - not_null

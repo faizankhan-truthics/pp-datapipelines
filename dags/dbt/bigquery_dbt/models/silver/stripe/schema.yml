@@ -1,0 +1,1437 @@
+version: 2
+
+models:
+  - name: int_stripe_charges
+    description: >
+      Incremental model containing Stripe charges enriched with historical
+      exchange rates to calculate USD amounts. Updated for 5 days ago so as to get captured dates as they become available
+
+    columns:
+      - name: id
+        description: Unique Stripe charge identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: amount_local
+        description: Charge amount in the original transaction currency.
+
+      - name: amount_captured_local
+        description: >
+          Captured amount in the original transaction currency. The full amount when the charge
+          row says not captured but a balance transaction exists.
+
+      - name: amount_refunded_local
+        description: >
+          Refunded amount in the original transaction currency: succeeded refunds from
+          bronze stripe_refunds, or the charge's own amount_refunded if larger.
+
+      - name: amount_usd
+        description: "Charge amount in USD major units (dollars): amount_local / minor_unit_divisor(currency) * historical rate. Zero-decimal currencies are not divided."
+
+      - name: amount_captured_usd
+        description: Captured amount in USD major units (dollars), same conversion as amount_usd.
+
+      - name: amount_refunded_usd
+        description: Refunded amount in USD major units (dollars), same conversion as amount_usd.
+
+      - name: balance_transaction
+        description: Stripe balance transaction identifier.
+
+      - name: created_date
+        description: Date the charge was created.
+        tests:
+          - not_null
+
+      - name: captured_date
+        description: Date the charge was captured. From Balance transactions.
+
+      - name: currency
+        description: Three-letter ISO currency code.
+        tests:
+          - not_null
+
+      - name: customer
+        description: Stripe customer identifier.
+
+      - name: order_
+        description: Stripe order identifier.
+
+      - name: paid
+        description: Indicates whether the charge was successfully paid.
+
+      - name: payment_intent
+        description: Associated Stripe Payment Intent identifier.
+
+      - name: refunded
+        description: Indicates whether the charge has been refunded.
+
+      - name: disputed
+        description: Indicates whether the charge has been disputed.
+
+      - name: status
+        description: Current Stripe charge status.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+      - name: rate
+        description: Historical exchange rate used to convert the transaction currency to USD.
+
+
+  - name: int_stripe_refunds
+    description: >
+      Stripe refunds enriched with historical exchange rates to calculate
+      refund amounts in USD. The model is incremental and merges on the
+      Stripe refund ID.  Updated for 5 days ago so as to get captured dates as they become available
+
+    columns:
+      - name: id
+        description: Unique Stripe refund identifier.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: amount_local
+        description: Refund amount in the original transaction currency.
+        data_tests:
+          - not_null
+
+      - name: amount_usd
+        description: Refund amount in USD major units (dollars) using the exchange rate for the refund date; zero-decimal currencies are not divided.
+
+      - name: currency
+        description: Three-letter ISO currency code.
+        data_tests:
+          - not_null
+
+      - name: created_date
+        description: Date the refund was created.
+        data_tests:
+          - not_null
+
+      - name: captured_date
+        description: Date the refund was captured. From Balance transactions.
+
+      - name: balance_transaction
+        description: Stripe balance transaction associated with the refund.
+
+      - name: charge
+        description: Stripe charge identifier.
+
+      - name: customer
+        description: Stripe customer identifier.
+
+      - name: payment_intent
+        description: Stripe payment intent identifier.
+
+      - name: reason
+        description: Reason provided for the refund.
+
+      - name: status
+        description: Refund status.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account that produced the refund.
+
+      - name: _elt_update_timestamp
+        description: Timestamp the record was last updated in the ELT pipeline.
+        data_tests:
+          - not_null
+
+  - name: int_stripe_disputes
+    description: >
+        Incremental Stripe disputes model enriched with historical currency
+        conversion rates to calculate USD amounts.  Updated for 5 days ago so as to get captured dates as they become available
+
+    columns:
+      - name: id
+        description: Unique Stripe dispute identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: amount_local
+        description: Disputed amount in the original transaction currency.
+        tests:
+          - not_null
+
+      - name: amount_usd
+        description: Disputed amount in USD major units (dollars) using the exchange rate for the dispute creation date; zero-decimal currencies are not divided.
+
+      - name: balance_transaction
+        description: Stripe balance transaction associated with the dispute.
+
+      - name: charge
+        description: Stripe charge associated with the dispute.
+
+      - name: created_date
+        description: Date the dispute was created.
+        tests:
+          - not_null
+
+      - name: captured_date
+        description: Date the dispute was captured. From Balance transactions.
+
+      - name: currency
+        description: ISO 4217 currency code.
+        tests:
+          - not_null
+
+      - name: is_charge_refundable
+        description: Indicates whether the disputed charge is refundable.
+
+      - name: payment_intent
+        description: Stripe Payment Intent identifier.
+
+      - name: reason
+        description: Stripe dispute reason.
+
+      - name: status
+        description: Current dispute status.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account identifier used during ingestion.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT process.
+        tests:
+          - not_null
+
+  - name: int_stripe_customers
+    description: >
+      Stripe customers. Grain: one row per customer (per account). Used to
+      resolve email/country for a customer independent of any single charge.
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - id
+              - _elt_stripe_account_id
+
+    columns:
+      - name: id
+        description: Unique Stripe customer identifier (unique per account, not globally).
+        tests:
+          - not_null
+
+      - name: email
+        description: Customer email address.
+
+      - name: name
+        description: Customer name.
+
+      - name: phone
+        description: Customer phone number.
+
+      - name: delinquent
+        description: Whether the customer currently has an unpaid/overdue invoice.
+
+      - name: created_date
+        description: Date the customer was created.
+
+      - name: billing_country
+        description: Billing address country, from the customer's `address` object. Frequently null — Stripe does not require billing address collection.
+
+      - name: shipping_country
+        description: Shipping address country, from the customer's `shipping` object. Frequently null for the same reason as billing_country.
+
+      - name: is_deleted
+        description: Whether the customer was deleted in Stripe.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_products
+    description: >
+      Stripe products. Grain: one row per product (per account).
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product_id
+              - _elt_stripe_account_id
+
+    columns:
+      - name: product_id
+        description: Unique Stripe product identifier (unique per account, not globally).
+        tests:
+          - not_null
+
+      - name: product_name
+        description: Human-readable product name.
+
+      - name: active
+        description: Whether the product is currently active/sellable.
+
+      - name: is_deleted
+        description: Whether the product was deleted in Stripe.
+
+      - name: default_price
+        description: Stripe price id used by default for this product.
+
+      - name: created_date
+        description: Date the product was created.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_prices
+    description: >
+      Stripe prices. Grain: one row per price (per account). A price belongs to
+      exactly one product.
+
+    columns:
+      - name: price_id
+        description: Unique Stripe price identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: product_id
+        description: Stripe product this price belongs to.
+
+      - name: nickname
+        description: Internal display name for the price.
+
+      - name: active
+        description: Whether the price is currently active/sellable.
+
+      - name: is_deleted
+        description: Whether the price was deleted in Stripe.
+
+      - name: type
+        description: "`one_time` or `recurring`."
+
+      - name: currency
+        description: Three-letter ISO currency code.
+
+      - name: unit_amount
+        description: Amount in the smallest currency unit (e.g. cents for USD).
+
+      - name: billing_interval
+        description: "For recurring prices: day / week / month / year."
+
+      - name: billing_interval_count
+        description: Number of intervals between billings (e.g. 3 with a month interval = quarterly).
+
+      - name: created_date
+        description: Date the price was created.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_subscriptions
+    description: >
+      Stripe subscriptions. Grain: one row per subscription (per account). Item
+      (price/product) detail lives in int_stripe_subscription_items since a
+      subscription can carry more than one item.
+
+    columns:
+      - name: id
+        description: Unique Stripe subscription identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: customer
+        description: Stripe customer identifier this subscription belongs to.
+
+      - name: status
+        description: Subscription status (active, past_due, canceled, trialing, etc.).
+
+      - name: currency
+        description: Three-letter ISO currency code.
+
+      - name: current_period_start_date
+        description: Start date of the current billing period.
+
+      - name: current_period_end_date
+        description: End date of the current billing period.
+
+      - name: start_date
+        description: Date the subscription started.
+
+      - name: cancel_at_period_end
+        description: Whether the subscription is set to cancel at the end of the current period.
+
+      - name: cancel_at
+        description: Scheduled cancellation timestamp, if any.
+
+      - name: canceled_at
+        description: Timestamp the subscription was actually canceled, if any.
+
+      - name: ended_at
+        description: Timestamp the subscription ended, if any.
+
+      - name: trial_start
+        description: Trial start timestamp, if any.
+
+      - name: trial_end
+        description: Trial end timestamp, if any.
+
+      - name: latest_invoice
+        description: Stripe invoice id of the most recent invoice for this subscription.
+
+      - name: collection_method
+        description: "`charge_automatically` or `send_invoice`."
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_subscription_items
+    description: >
+      Item (price/product) detail shredded out of each subscription's `items`
+      payload. Grain: subscription_item_id.
+
+    columns:
+      - name: subscription_id
+        description: Parent Stripe subscription id.
+        tests:
+          - not_null
+
+      - name: subscription_item_id
+        description: Unique Stripe subscription item identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: price_id
+        description: Stripe price id for this item.
+
+      - name: product_id
+        description: Stripe product id for this item (denormalized from the price).
+
+      - name: quantity
+        description: Quantity of the price on this subscription item.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_subscriptions_history
+    description: >
+      Every historical version of each Stripe subscription, from the 8
+      customer.subscription.* events in stripe_events (created, updated, deleted, paused,
+      resumed, pending_update_applied, pending_update_expired, trial_will_end). Same columns
+      as int_stripe_subscriptions (which keeps only the latest version) plus the event
+      columns. Grain: one row per subscription event (per account); each row is the
+      subscription right after that event. Coverage starts at the first loaded event, since
+      Stripe only keeps events for 30 days. Item detail lives in
+      int_stripe_subscription_items_history.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_id
+              - _elt_stripe_account_id
+    columns:
+      - name: event_id
+        description: Stripe event id this version comes from.
+        data_tests:
+          - not_null
+      - name: event_type
+        description: >
+          The customer.subscription.* event type: created, updated, deleted, paused, resumed,
+          pending_update_applied, pending_update_expired or trial_will_end.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - customer.subscription.created
+                  - customer.subscription.updated
+                  - customer.subscription.deleted
+                  - customer.subscription.paused
+                  - customer.subscription.resumed
+                  - customer.subscription.pending_update_applied
+                  - customer.subscription.pending_update_expired
+                  - customer.subscription.trial_will_end
+      - name: event_created_ts
+        description: When Stripe created the event, i.e. when this version took effect.
+        data_tests:
+          - not_null
+      - name: id
+        description: Stripe subscription identifier.
+        data_tests:
+          - not_null
+      - name: customer
+        description: Stripe customer identifier this subscription belongs to.
+      - name: status
+        description: Subscription status after this event (active, past_due, canceled, trialing, etc.).
+        data_tests:
+          - not_null
+      - name: currency
+        description: Three-letter ISO currency code.
+      - name: created_ts
+        description: When the subscription was created in Stripe (same on every version).
+      - name: current_period_start_date
+        description: >
+          Start date of the current billing period. Taken from the items on API versions
+          (2025-03-31 onward) that no longer carry it on the subscription.
+      - name: current_period_end_date
+        description: End date of the current billing period (same fallback as current_period_start_date).
+      - name: start_date
+        description: Date the subscription started.
+      - name: cancel_at_period_end
+        description: Whether the subscription is set to cancel at the end of the current period.
+      - name: cancel_at
+        description: Scheduled cancellation timestamp, if any.
+      - name: canceled_at
+        description: Timestamp the subscription was actually canceled, if any.
+      - name: ended_at
+        description: Timestamp the subscription ended, if any.
+      - name: trial_start
+        description: Trial start timestamp, if any.
+      - name: trial_end
+        description: Trial end timestamp, if any.
+      - name: latest_invoice
+        description: Stripe invoice id of the most recent invoice for this subscription.
+      - name: collection_method
+        description: "`charge_automatically` or `send_invoice`."
+      - name: discount_coupon_id
+        description: >
+          Coupon id of the single `discount` object. Only on older API versions; newer ones
+          carry discount ids only, so this is mostly null.
+      - name: previous_attributes
+        description: On update events, the prior values of the fields that changed.
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        data_tests:
+          - not_null
+      - name: _elt_update_timestamp
+        description: Timestamp when the event was loaded in the ELT pipeline.
+        data_tests:
+          - not_null
+
+  - name: int_stripe_subscription_items_history
+    description: >
+      Every historical version of each subscription's items, shredded out of the items
+      payload of each customer.subscription.* event. Same columns as
+      int_stripe_subscription_items (which keeps only the latest version) plus the event
+      columns. Grain: one row per subscription item per subscription event. Join to
+      int_stripe_subscriptions_history on event_id + _elt_stripe_account_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_id
+              - subscription_item_id
+              - _elt_stripe_account_id
+    columns:
+      - name: event_id
+        description: Stripe event id this item version comes from.
+        data_tests:
+          - not_null
+      - name: event_type
+        description: The customer.subscription.* event type.
+      - name: event_created_ts
+        description: When Stripe created the event, i.e. when this version took effect.
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: Parent Stripe subscription id.
+        data_tests:
+          - not_null
+      - name: subscription_item_id
+        description: Stripe subscription item identifier.
+        data_tests:
+          - not_null
+      - name: price_id
+        description: Stripe price id for this item.
+      - name: product_id
+        description: Stripe product id for this item (denormalized from the price).
+      - name: quantity
+        description: Quantity of the price on this subscription item.
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        data_tests:
+          - not_null
+
+  - name: int_stripe_invoices
+    description: >
+      Stripe invoices. Grain: one row per invoice (per account). Unlike other
+      int_stripe_* models this does not drop rows lacking a USD conversion rate,
+      since an invoice's primary role here is linking a charge to a
+      subscription/product, not $ reporting.
+
+    columns:
+      - name: id
+        description: Unique Stripe invoice identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: customer
+        description: Stripe customer identifier.
+
+      - name: subscription
+        description: Stripe subscription id this invoice was generated for, if any.
+
+      - name: charge
+        description: Stripe charge id that paid this invoice, if any. Join key from a charge to its invoice/subscription/product.
+
+      - name: status
+        description: Invoice status (draft, open, paid, void, uncollectible).
+
+      - name: collection_method
+        description: "`charge_automatically` or `send_invoice`."
+
+      - name: is_deleted
+        description: Whether the invoice was deleted in Stripe.
+
+      - name: billing_reason
+        description: Why the invoice was created (subscription_cycle, subscription_create, manual, etc.).
+
+      - name: amount_due_local
+        description: Amount due in the invoice's original currency.
+
+      - name: amount_paid_local
+        description: Amount paid in the invoice's original currency.
+
+      - name: amount_remaining_local
+        description: Amount remaining in the invoice's original currency.
+
+      - name: amount_due_usd
+        description: Amount due converted to USD using the exchange rate for the invoice creation date. Null when no rate is available for that currency/date.
+
+      - name: amount_paid_usd
+        description: Amount paid converted to USD. Null when no rate is available for that currency/date.
+
+      - name: currency
+        description: Three-letter ISO currency code.
+
+      - name: created_date
+        description: Date the invoice was created.
+
+      - name: period_start_date
+        description: Start date of the billing period this invoice covers.
+
+      - name: period_end_date
+        description: End date of the billing period this invoice covers.
+
+      - name: paid
+        description: Whether the invoice has been paid in full.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_invoice_lines
+    description: >
+      Line item (price/product) detail shredded out of each invoice's `lines`
+      payload. Grain: invoice_line_id.
+
+    columns:
+      - name: invoice_id
+        description: Parent Stripe invoice id.
+        tests:
+          - not_null
+
+      - name: charge_id
+        description: Stripe charge id that paid the parent invoice, if any.
+
+      - name: subscription_id
+        description: Stripe subscription id the parent invoice was generated for, if any.
+
+      - name: invoice_line_id
+        description: Unique Stripe invoice line item identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: price_id
+        description: Stripe price id for this line item.
+
+      - name: product_id
+        description: Stripe product id for this line item (denormalized from the price).
+
+      - name: amount_local
+        description: Line item amount in the invoice's original currency.
+
+      - name: currency
+        description: Three-letter ISO currency code.
+
+      - name: description
+        description: Free-text line item description.
+
+      - name: proration
+        description: Whether this line was generated by a subscription proration (e.g. a mid-cycle plan change), rather than a regular billing cycle. Excluded from MRR.
+
+      - name: period_start_date
+        description: >
+          Start date of the service period this specific line covers, from the line's own
+          `period.start` (not the parent invoice's period_start/period_end, which Stripe
+          collapses to a single instant on subscription_create invoices).
+
+      - name: period_end_date
+        description: End date of the service period this specific line covers, from the line's own `period.end`.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_payment_intents
+    description: >
+      Stripe payment intents, enriched with historical exchange rates. Grain:
+      one row per payment intent (per account).
+
+    columns:
+      - name: id
+        description: Unique Stripe payment intent identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: amount_local
+        description: Amount in the original transaction currency.
+
+      - name: amount_capturable_local
+        description: Amount currently capturable, in the original transaction currency.
+
+      - name: amount_received_local
+        description: Amount actually received, in the original transaction currency.
+
+      - name: amount_usd
+        description: Amount in USD major units (dollars) using the exchange rate for the creation date. Null when no rate is available for that currency/date.
+
+      - name: application_fee_amount
+        description: Application fee amount, if any.
+
+      - name: created_date
+        description: Date the payment intent was created.
+
+      - name: currency
+        description: Three-letter ISO currency code.
+
+      - name: customer
+        description: Stripe customer identifier.
+
+      - name: description
+        description: Free-text description.
+
+      - name: latest_charge
+        description: Stripe charge id of the most recent charge attempt.
+
+      - name: payment_method
+        description: Stripe payment method id used.
+
+      - name: capture_method
+        description: "`automatic` or `manual`."
+
+      - name: confirmation_method
+        description: "`automatic` or `manual`."
+
+      - name: status
+        description: Payment intent status.
+
+      - name: cancellation_reason
+        description: Reason the payment intent was canceled, if applicable.
+
+      - name: canceled_at_ts
+        description: Timestamp the payment intent was canceled, if applicable.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_balance_transactions
+    description: >
+      Stripe balance transactions, enriched with historical exchange rates.
+      Grain: one row per balance transaction (per account). Not currently
+      referenced by int_stripe_charges (which joins the bronze table directly
+      for captured_date) or any gold model.
+
+    columns:
+      - name: id
+        description: Unique Stripe balance transaction identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: amount_local
+        description: Gross amount in the original currency.
+
+      - name: fee_local
+        description: Stripe fee in the original currency.
+
+      - name: net_local
+        description: Net amount (amount - fee) in the original currency.
+
+      - name: amount_usd
+        description: Gross amount converted to USD using the exchange rate for the creation date. Null when no rate is available for that currency/date.
+
+      - name: net_usd
+        description: Net amount converted to USD. Null when no rate is available for that currency/date.
+
+      - name: created_date
+        description: Date the balance transaction was created.
+
+      - name: available_on_date
+        description: Date the funds become available.
+
+      - name: currency
+        description: Three-letter ISO currency code.
+
+      - name: type
+        description: Transaction type (charge, refund, payout, adjustment, etc.).
+
+      - name: reporting_category
+        description: Stripe's reporting category for this transaction.
+
+      - name: balance_type
+        description: "`issuing` or `stripe`."
+
+      - name: status
+        description: Balance transaction status.
+
+      - name: source
+        description: Id of the source object (charge, refund, payout, etc.) this transaction is derived from.
+
+      - name: exchange_rate
+        description: Stripe's own reported exchange rate for cross-currency settlement, if any (distinct from int_currency_conversion's historical rate).
+
+      - name: description
+        description: Free-text description.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+
+  - name: int_stripe_early_fraud_warnings
+    description: >
+      Stripe early fraud warnings. Grain: one row per warning (per account).
+      Referenced by stripe_monthly_vamp. stripe_monthly_recon still joins the
+      bronze table directly.
+
+    columns:
+      - name: id
+        description: Unique Stripe early fraud warning identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: charge
+        description: Stripe charge id this warning applies to.
+
+      - name: payment_intent
+        description: Stripe payment intent id this warning applies to.
+
+      - name: fraud_type
+        description: Type of fraud reported by the card issuer.
+
+      - name: actionable
+        description: Whether Stripe recommends acting on this warning (e.g. refunding).
+
+      - name: livemode
+        description: Whether this warning was generated in live mode.
+
+      - name: created_date
+        description: Date the warning was created.
+
+      - name: _elt_stripe_account_id
+        description: Stripe account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null
+  - name: int_stripe_transactions
+    description: >
+      Stripe charges across every account, payment side of the generalized GA4 stitch. Grain:
+      stripe_date x transaction_id (transaction_id is the Stripe PaymentIntent id -- GA4's
+      ecommerce.transaction_id on Stripe-backed properties). Carries subscription_id/invoice_id
+      from int_stripe_invoices (left join on payment_intent) so a matched transaction can be
+      traced back to its subscription the same way int_ga4_payment_stitch already does for
+      Solidgate -- null on both for the (majority) of PaymentIntents that aren't tied to any
+      invoice at all, i.e. one-time purchases rather than subscription billing.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - stripe_date
+              - transaction_id
+
+    columns:
+      - name: stripe_date
+        description: Date the charge was created.
+        data_tests:
+          - not_null
+
+      - name: transaction_id
+        description: Stripe PaymentIntent id.
+        data_tests:
+          - not_null
+
+      - name: _elt_stripe_account_id
+        description: "Stripe account this charge belongs to. Join key to seed_ga4_payment_account_map.account_key."
+        data_tests:
+          - not_null
+
+      - name: amount_usd
+        description: "Sum of succeeded-charge amounts (status = 'succeeded') under this PaymentIntent, in USD. 0 when every charge attempt for this transaction_id failed/is pending -- the row still exists for match-rate counting."
+
+      - name: subscription_id
+        description: "The subscription this PaymentIntent's invoice belongs to, when it has one. Null for one-time (non-invoice) PaymentIntents -- most of them, on these accounts."
+
+      - name: invoice_id
+        description: "The invoice this PaymentIntent paid, when there is one. Null for one-time (non-invoice) PaymentIntents."
+
+  - name: int_stripe_mrr_eligible_invoice_lines
+    description: >
+      Invoice lines that count as recurring revenue, normalized to a monthly rate.
+      Excludes unpaid, zero-value, non-subscription, proration and non-recurring lines.
+      Grain: invoice_line_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - invoice_line_id
+    columns:
+      - name: invoice_line_id
+        description: "Unique Stripe invoice line item identifier."
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: "Stripe subscription id."
+        data_tests:
+          - not_null
+      - name: price_id
+        description: "Stripe price id billed on this line; source of the recurring cadence."
+      - name: customer
+        description: "Stripe customer id. Empty when Stripe sent no customer on the invoice."
+      - name: currency
+        description: "Price currency; MRR is summed per currency."
+      - name: billing_cycle
+        description: "weekly / biweekly / monthly / quarterly / semiannual / yearly, or `other` for a non-standard interval/count combination."
+      - name: months_in_period
+        description: "Months covered by one billing cycle at this price's interval. Never null — a null divisor would drop the subscription from every sum."
+        data_tests:
+          - not_null
+      - name: mrr_local
+        description: "(amount / minor_unit_divisor) / months_in_period, in the price's currency."
+        data_tests:
+          - not_null
+
+  - name: int_stripe_mrr_local_subscription_daily
+    description: >
+      Daily MRR per subscription item — the fact table behind every aggregate MRR figure.
+      A subscription item contributes on a date when a paid invoice line's billing period
+      covers it, using the half-open interval [start, end). Grain is subscription x price
+      (not subscription alone) since a Stripe subscription can carry more than one
+      recurring item. Grain: snapshot_date x subscription_id x price_id x _elt_stripe_account_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - subscription_id
+              - price_id
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "Date the MRR value applies to."
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: "Stripe subscription id."
+        data_tests:
+          - not_null
+      - name: currency
+        description: "Price currency."
+        data_tests:
+          - not_null
+      - name: mrr_local
+        description: "Monthly rate contributed by this subscription item on this date."
+        data_tests:
+          - not_null
+
+  - name: int_stripe_mrr_local_daily
+    description: >
+      Daily MRR in local currency per Stripe account and currency, with the day-over-day
+      change. Grain: snapshot_date x _elt_stripe_account_id x currency.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+              - currency
+    columns:
+      - name: snapshot_date
+        description: "Date the MRR value applies to."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Stripe account — the product dimension."
+        data_tests:
+          - not_null
+      - name: currency
+        description: "Price currency. Totals are only comparable within a currency."
+        data_tests:
+          - not_null
+      - name: mrr
+        description: "Total MRR in local currency."
+        data_tests:
+          - not_null
+      - name: mrr_change
+        description: "Change vs the previous day for the same account and currency."
+      - name: unmapped_cycle_rows
+        description: "Subscription items on a non-standard interval/count combination; approximated, so watch this."
+
+  - name: int_stripe_mrr_customer_daily
+    description: >
+      What each customer is worth per month, for every day, plus the first day they ever
+      paid us. Leaves out invoice lines with no customer on the invoice, so the total sits
+      a little under the account-level MRR marts.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - customer
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The day this figure applies to."
+        data_tests:
+          - not_null
+      - name: customer
+        description: "The Stripe customer."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: currency
+        description: "The currency the customer's plans are priced in."
+      - name: currencies
+        description: "How many different currencies the customer pays in. Almost always 1."
+      - name: mrr_local
+        description: "Monthly value in the customer's own currency."
+        data_tests:
+          - not_null
+      - name: fx_rate
+        description: >
+          The exchange rate used. We take the rate for that day, or the most recent one
+          before it if the day is missing. US dollars are left as they are.
+      - name: mrr_usd
+        description: "Monthly value in US dollars. Empty if we have no rate for the currency."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: has_missing_fx
+        description: "Flags a customer whose currency has no exchange rate."
+        data_tests:
+          - not_null
+      - name: missing_fx_currencies
+        description: "Which currency was missing a rate."
+      - name: active_subscriptions
+        description: "How many subscriptions the customer is paying for that day."
+        data_tests:
+          - not_null
+      - name: subscriptions_live_now
+        description: >
+          How many of the customer's subscriptions are `active` or `past_due` today, not on
+          this date. Used by churn to tell a lapse from a customer still on a payment retry.
+        data_tests:
+          - not_null
+      - name: first_revenue_date
+        description: >
+          The first day this customer ever paid us. Taken from their invoices, so it holds
+          even if their history starts before the period we are reporting on.
+        data_tests:
+          - not_null
+
+  - name: int_stripe_mrr_movements_daily
+    description: >
+      Compares each customer's monthly value against the day before and labels what changed.
+      New business, expansion and contraction are identified; everything else shows as `other`.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - customer
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The day the change happened."
+        data_tests:
+          - not_null
+      - name: customer
+        description: "The Stripe customer."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: prev_mrr_local
+        description: "What they were worth the day before, in their own currency."
+      - name: mrr_local
+        description: "What they are worth today, in their own currency."
+      - name: movement_mrr_local
+        description: "The difference between the two."
+      - name: mrr_usd
+        description: "What they are worth today, in US dollars."
+      - name: movement_mrr_usd
+        description: "The difference, in US dollars."
+      - name: movement_type
+        description: >
+          `new_business` on a customer's first day, `expansion` when they start paying more,
+          `contraction` when they pay less but not nothing. Only compares against the day
+          before — a customer returning after a break is handled by the churn and
+          reactivation models, not here. Everything else is `other`.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['new_business', 'expansion', 'contraction', 'other']
+      - name: contraction_reason
+        description: "Why they pay less: `cancellation` if they dropped an item, `downgrade_or_discount` if they kept the same number. Null unless contraction."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['cancellation', 'downgrade_or_discount']
+      - name: first_revenue_date
+        description: "The first day this customer ever paid us."
+      - name: has_missing_fx
+        description: "Flags a customer whose currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currency was missing a rate."
+
+  - name: int_stripe_new_business_daily
+    description: >
+      How many customers paid us for the first time each day, and what they are worth per
+      month. Each customer counts once, ever.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The day the customers arrived."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: new_customers
+        description: "Customers paying us for the first time."
+        data_tests:
+          - not_null
+      - name: new_subscriptions
+        description: "How many subscriptions they started with."
+      - name: new_business_mrr_local
+        description: "Their combined monthly value, mixing currencies. Rough guide only."
+      - name: new_business_mrr_usd
+        description: "Their combined monthly value in US dollars. This is the number to use."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: >
+          New customers we could not convert because their currency has no exchange rate.
+          They still count as customers, but their value is missing from the dollar total.
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_stripe_expansion_daily
+    description: >
+      Existing customers who started paying more, and by how much. Records the increase,
+      not the customer's new total.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The day the increase happened."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: expansion_customers
+        description: "Customers paying more than the day before."
+        data_tests:
+          - not_null
+      - name: expansion_mrr_local
+        description: "How much more, in their own currency. Mixes currencies — rough guide only."
+      - name: expansion_mrr_usd
+        description: "How much more, in US dollars. This is the number to use."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_stripe_contraction_daily
+    description: >
+      Existing customers who started paying less but did not stop altogether, and by how
+      much. Records the decrease, not the customer's new total. Values are negative.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The day the decrease happened."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: contraction_customers
+        description: "Customers paying less than the day before."
+        data_tests:
+          - not_null
+      - name: cancellation_customers
+        description: "Of those, the ones who dropped an item but kept at least one."
+      - name: downgrade_customers
+        description: "Of those, the ones on the same number of items paying less."
+      - name: contraction_mrr_local
+        description: "How much less, in their own currency. Mixes currencies — rough guide only."
+      - name: contraction_mrr_usd
+        description: "How much less, in US dollars. This is the number to use. Negative."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_stripe_mrr_churn_daily
+    description: >
+      Customers who stopped paying us for good, and what we lost. Dated the day after
+      their last paid day. Values are negative.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The first day they were no longer paying."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: churned_customers
+        description: >
+          Customers who left that day. Leaves out anyone still on a payment retry, and
+          anyone who came back within the grace days.
+        data_tests:
+          - not_null
+      - name: churn_mrr_local
+        description: "What we lost, in their own currency. Mixes currencies — rough guide only."
+      - name: churn_mrr_usd
+        description: "What we lost, in US dollars. This is the number to use. Negative."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_stripe_mrr_reactivation_daily
+    description: >
+      Customers who had stopped paying and started again. Counts their whole value, not
+      the difference against what they paid before, because they left in between.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+    columns:
+      - name: snapshot_date
+        description: "The day they started paying again."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: reactivated_customers
+        description: "Customers who came back that day, after being gone longer than the grace days."
+        data_tests:
+          - not_null
+      - name: reactivation_mrr_local
+        description: "What they are worth, in their own currency. Mixes currencies — rough guide only."
+      - name: reactivation_mrr_usd
+        description: "What they are worth, in US dollars. This is the number to use."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+    
+  - name: int_stripe_customer_attribution
+    description: >
+      Where each Stripe customer came from, taken from the earliest charge of theirs that GA4
+      saw. Recurring/renewal charges carry no GA4 event, so the customer is attributed once and
+      every later charge inherits it. Customers we cannot place are kept as `unattributed` so
+      channel revenue still adds up to total revenue. Grain: one row per customer per account.
+      KNOWN GAP: OQG and QCI will show almost no attribution until their int_stripe_prices
+      backfill runs — see the model's header comment.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - customer
+              - _elt_stripe_account_id
+    columns:
+      - name: customer
+        description: "The Stripe customer id."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: source
+        description: "Where they came from, e.g. google. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic."
+      - name: campaign
+        description: "The campaign that brought them in, when one was tagged."
+      - name: campaign_id
+        description: "Google Ads campaign id, for joining to campaign spend."
+      - name: gclid
+        description: "Google Ads click id, when the charge happened in the same session as the click."
+      - name: attributed_from_subscription_id
+        description: >
+          Subscription of the invoice behind the charge that carried the attribution. Null for
+          unattributed customers, and for a matched charge that no subscription invoice raised
+          (e.g. a one-off payment).
+      - name: attributed_from_date
+        description: >
+          The day of the charge that carried the attribution. Well after the customer's first
+          day means we missed their earlier charges and picked up a later one, so treat the
+          attribution as weaker.
+      - name: attribution_status
+        description: "Whether we could place this customer at all."
+        data_tests:
+          - not_null
+
+  - name: int_stripe_balance_transactions_dedupe
+    description: >
+      Deduplicated view of captured Stripe charges from the bronze balance_transactions
+      table (type = 'charge' only), one row per distinct (source, created_ts, amount)
+      combination. Used to get a single captured-at date per charge without the fan-out
+      the raw bronze table can have.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source
+              - created_ts
+              - amount
+    columns:
+      - name: source
+        description: Id of the charge object this row is derived from.
+        data_tests:
+          - not_null
+      - name: created_ts
+        description: Timestamp the charge was created.
+      - name: amount
+        description: Charge amount in the original currency's smallest unit.

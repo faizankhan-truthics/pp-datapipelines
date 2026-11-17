@@ -1,0 +1,56 @@
+version: 2
+
+seeds:
+  - name: seed_billing_health_products
+    description: >
+      Product universe for the billing health report: maps each product to its entity, its
+      Solidgate account and its Stripe product (the `Product` value in bronze stripe_accounts,
+      which groups all of a product's Stripe accounts), plus the Slack owners its alerts tag.
+      Products with no Solidgate account charge on Stripe directly. One row per product.
+
+    columns:
+      - name: product_key
+        description: Stable snake_case key for the product, used for joins and as the report row key.
+        data_type: string
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_name
+        description: Display name shown in the report and in Slack alerts.
+        data_type: string
+        data_tests:
+          - not_null
+
+      - name: entity
+        description: Business entity that owns the product.
+        data_type: string
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['Apollo', 'Strategic Outsourcing']
+
+      - name: solidgate_account
+        description: Solidgate `_elt_account_name` the product charges through; empty for Stripe-direct products.
+        data_type: string
+        data_tests:
+          - unique
+
+      - name: stripe_product
+        description: Value of `Product` in bronze stripe_accounts; covers every Stripe account of the product.
+        data_type: string
+        data_tests:
+          - unique
+
+      - name: payments_owner_slack_id
+        description: Slack member IDs (U...), space-separated, tagged on red payment alerts (approval, blocked, duplicates, retries, trial-to-paid).
+        data_type: string
+
+      - name: product_owner_slack_id
+        description: Slack member IDs (U...), space-separated, tagged on red "cancelled before trial end" alerts.
+        data_type: string
+
+      - name: is_active
+        description: Whether the product is included in the report.
+        data_type: bool

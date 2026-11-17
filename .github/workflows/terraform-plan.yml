@@ -1,0 +1,71 @@
+name: Terraform plan
+
+# Runs only on PRs that change Terraform code. Never applies.
+# PR code runs here, so this job holds no secrets: it logs in as terraform-plan (read-only
+# access to the state), never calls Galaxy (-refresh=false) and uses placeholder secrets
+# (plan_only). It compares the code with the state; Terraform apply re-plans against live
+# Galaxy before applying.
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    paths:
+      - "terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+
+concurrency:
+  group: terraform-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write # keyless GCP login (Workload Identity Federation)
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    name: plan (${{ matrix.stack }})
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [starburst, bigquery_access]
+    defaults:
+      run:
+        working-directory: terraform/${{ matrix.stack }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/909664660292/locations/global/workloadIdentityPools/github/providers/pp-datapipelines
+          service_account: terraform-plan@data-499514.iam.gserviceaccount.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+
+      - name: terraform fmt
+        run: terraform fmt -check -recursive
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        run: |
+          terraform plan -input=false -no-color -refresh=false -lock=false -var=plan_only=true -out=tfplan
+          {
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

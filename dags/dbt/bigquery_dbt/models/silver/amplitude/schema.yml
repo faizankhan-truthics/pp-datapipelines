@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: int_amplitude_experiment_events
+    description: >
+      Experiment exposures and conversion events from Amplitude, read by GrowthBook. The
+      assignment query filters to event_category = 'exposure'; fact tables filter to
+      event_category = 'conversion'. Exposure rows carry experiment_id/variation_id; conversion
+      rows carry amount_local/currency/amount_usd. Deduplicated on Amplitude's event uuid. No PII:
+      the contract fails the build if a column is added. Tests live in
+      tests/test_amplitude_experiment_events_*.sql.
+    config:
+      # Repeated from the model file: dbt validates the contract against the silver default
+      # (incremental) unless the materialization is also set here.
+      materialized: view
+      contract:
+        enforced: true
+    columns:
+      - name: event_id
+        data_type: string
+        description: "Amplitude event uuid."
+      - name: amplitude_project_id
+        data_type: string
+        description: "Amplitude project the event came from (the EVENTS_<project id> table suffix)."
+      - name: device_id
+        data_type: string
+        description: "Amplitude device ID. GrowthBook's hash attribute (deviceId). Null for server events (platform = 'node'), whose device id is synthetic."
+      - name: user_id
+        data_type: string
+        description: "Logged-in user ID, when known. The only identifier on server events such as subscription_converted."
+      - name: timestamp
+        data_type: timestamp
+        description: "Amplitude event_time (device clock), or server_received_time when they are more than amplitude_max_clock_skew_hours (48) apart."
+      - name: event_category
+        data_type: string
+        description: "exposure ([Experiment] Exposure rows) or conversion (all other rows)."
+      - name: event_type
+        data_type: string
+      - name: experiment_id
+        data_type: string
+        description: "GrowthBook experiment tracking key. Exposure rows only."
+      - name: variation_id
+        data_type: string
+        description: "GrowthBook variation key (control = 0, test = 1, b/c/d/e = the variant letter). Exposure rows only."
+      - name: amount_local
+        data_type: float64
+        description: "Price in the event currency. Conversion rows only; missing on most purchases."
+      - name: currency
+        data_type: string
+        description: "Conversion rows only."
+      - name: amount_usd
+        data_type: float64
+        description: "amount_local converted with int_currency_conversion at the event date's rate."

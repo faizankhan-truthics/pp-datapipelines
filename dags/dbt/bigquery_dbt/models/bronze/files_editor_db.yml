@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: bronze_files_editor_db
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: >
+      Raw 1:1 mirrors of files_editor's Postgres billing tables (pdfbox_rds_postgres,
+      reached via Starburst) -- no joins, no business logic. See
+      models/silver/anytrack_recon/ for the classification/joins built on top of these.
+    config:
+      tags: ["files_editor_db", "bronze"]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: files_editor_billing_order_payments
+        description: "Payment transactions (auth + refund operations) for files_editor orders."
+      - name: files_editor_billing_orders
+        description: "Order records -- trial/term/payment-plan state driving the subscription classification."
+      - name: files_editor_billing_customers
+        description: "Customer records, FK bridge between orders and clients."
+      - name: files_editor_billing_clients
+        description: "Client/account records, created at signup -- the signup-event anchor, independent of whether the client ever paid."
+      - name: files_editor_billing_payment_plans
+        description: "Payment plan reference data (title/type), used to exclude discounted renewals from the Renewal classification."

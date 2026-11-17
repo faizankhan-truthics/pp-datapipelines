@@ -1,0 +1,31 @@
+version: 2
+
+sources:
+  - name: bronze_growthbook
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    config:
+      tags: [ "growthbook", "bronze" ]
+
+    tables:
+      - name: growthbook_features
+        description: >
+          GrowthBook feature flags, latest state. One row per flag: type, default value, archived
+          flag, tags, project, owner (user id), last revision, per-environment on/off (`environments`)
+          and the rules (`rules`: type, scope, served value, coverage, experiment link). Rule targeting
+          and environment definitions are dropped because they can hold user ids or emails. A flag
+          deleted in GrowthBook stays with its last state, and its _elt_update_timestamp stops moving.
+        # No generic tests here: they cannot skip a table the DAG has not created yet. The singular tests
+        # in tests/test_growthbook_*_quality.sql check duplicate ids and skip a missing table.
+        columns:
+          - name: id
+            description: "Feature flag key; the MERGE key."
+      - name: growthbook_projects
+        description: >
+          GrowthBook projects, latest state: id, name, description, public id, whether flags can use
+          targeting, owner (user id) and dates. A flag carries only its project id
+          (growthbook_features.project), so join on this table's id to get the project name. The
+          owner's email and the project settings are not stored.
+        columns:
+          - name: id
+            description: "GrowthBook project id; the MERGE key and the value of growthbook_features.project."

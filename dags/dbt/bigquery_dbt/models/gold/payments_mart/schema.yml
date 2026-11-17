@@ -1,0 +1,84 @@
+version: 2
+
+models:
+
+  - name: fct_payments
+    description: >
+      One row per payment ledger entry of a product: a collected payment (positive amount_usd) or a
+      refund (negative amount_usd), across Solidgate and Stripe, so net revenue per user or
+      experiment variant is a plain sum. Money and dates come from the same ledgers as
+      gold.net_revenue_daily (Stripe balance transactions, Solidgate financial entries), so daily
+      gross payments and refunds match it; a payment Solidgate routed to Stripe is counted once, on
+      the Stripe side. The user is looked up afterwards (Stripe charge / Solidgate card order, then
+      identity resolution): a payment whose customer is not found keeps its money with a null
+      user_key. Joins to fct_ab_test_users on app_user_id (null when the payer is not linked to an
+      app user). Known gaps: disputes / chargebacks and fees are not included.
+      Grain: one row per ledger entry (ref_id).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - event_source
+              - ref_id
+      # a user has exactly one first payment (stage `customer`) per product
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - user_key
+          config:
+            where: "stage = 'customer'"
+    columns:
+      - name: product
+        data_tests:
+          - not_null
+      - name: user_key
+        description: Journey-mart user id (see dim_user_journey). Not an email hash. Null when the payer's customer is not found.
+        data_tests:
+          # a payment keeps its money without a user, but a hole in int_stripe_charges /
+          # int_solidgate_card_orders or the identity resolution shows up here as a spike
+          - not_null:
+              config:
+                where: "event_date >= date_sub(current_date(), interval 30 day)"
+                severity: warn
+                warn_if: ">500"
+      - name: app_user_id
+        description: The app's account id (the Amplitude user_id). Null when the payer is not linked to an app user.
+      - name: event_source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+      - name: event_name
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['payment', 'refund']
+      - name: stage
+        description: "`customer` for the user's first paid payment, `renewal` for later ones, `refund` for refunds, `unlinked` for a payment with no user_key."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['customer', 'renewal', 'refund', 'unlinked']
+      - name: event_ts
+        description: The ledger entry's own time (Stripe balance transaction created_ts, Solidgate transaction_datetime_utc); event_date is the ledger date used for daily totals.
+        data_tests:
+          - not_null
+      - name: event_date
+        data_tests:
+          - not_null
+      - name: ref_id
+        description: Ledger entry id (Stripe balance transaction id, Solidgate financial entry id).
+        data_tests:
+          - not_null
+      - name: source_id
+        description: The charge or refund id (Stripe) or the order id (Solidgate) the ledger entry belongs to.
+      - name: amount_usd
+        description: Major units in USD. Positive for a payment, negative for a refund (a ledger adjustment can reverse the sign).
+        data_tests:
+          - not_null
+      - name: is_first_payment
+        description: True for the user's first paid payment (stage `customer`).
+        data_tests:
+          - not_null

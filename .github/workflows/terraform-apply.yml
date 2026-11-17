@@ -1,0 +1,98 @@
+name: Terraform apply
+
+# Two stacks share this file (GCP only lets this file, from main, log in as terraform-ci):
+#   Both are manual: Actions → Terraform apply → Run workflow (branch: main), then pick the stack
+#   (starburst or bigquery_access). Merging a PR does not apply anything.
+# Plans against the live system, then applies exactly that plan if it succeeded and has
+# changes; with no changes it only refreshes the state.
+# Only this file, run from main, can log in as terraform-ci (enforced by GCP on the
+# workflow_ref claim, not by the `if` below).
+on:
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: Terraform stack to apply
+        type: choice
+        options:
+          - starburst
+          - bigquery_access
+        default: starburst
+
+# Never cancel a running apply; queue instead.
+concurrency:
+  group: terraform-apply
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # keyless GCP login (Workload Identity Federation)
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  plan-and-apply:
+    # Only what is merged in main gets applied.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/${{ inputs.stack }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/909664660292/locations/global/workloadIdentityPools/github/providers/pp-datapipelines
+          service_account: terraform-ci@data-499514.iam.gserviceaccount.com
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.16.6"
+          terraform_wrapper: false
+
+      - name: terraform init
+        run: terraform init -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+      # -detailed-exitcode: 0 = no changes, 1 = error, 2 = changes.
+      - name: terraform plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -no-color -detailed-exitcode -out=tfplan
+          code=$?
+          set -e
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          {
+            echo '## Plan'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: terraform apply
+        if: steps.plan.outputs.changes == 'true'
+        run: |
+          set -o pipefail
+          terraform apply -input=false -no-color tfplan | tee apply.log
+          {
+            echo '## Apply'
+            echo '```'
+            cat apply.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Nothing to change in Galaxy: still save what Galaxy returned to the state, so PR plans
+      # (-refresh=false) compare against an up-to-date state. Writes the state only.
+      - name: Refresh state
+        if: steps.plan.outputs.changes == 'false'
+        run: |
+          terraform apply -refresh-only -auto-approve -input=false -no-color
+          echo "No changes. Nothing applied; state refreshed." >> "$GITHUB_STEP_SUMMARY"

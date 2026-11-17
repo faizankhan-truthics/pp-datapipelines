@@ -1,0 +1,133 @@
+version: 2
+
+models:
+  - name: dim_project
+    description: >
+      Canonical Project dimension for the dashboard's Project filter -- passthrough of
+      seed_ga4_payment_account_map (7 projects per Borys's Project & Funnel URL mapping). Covers every
+      known project regardless of GA4/payment status; has_ga4_export=false rows (tracelo,
+      fitday) still appear here so the filter's full project list doesn't depend on which
+      properties happen to have usable data yet.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - ga4_property_name
+    columns:
+      - name: ga4_property_name
+        description: "Join key to int_ga4_funnel_sessions and seed_ga4_payment_account_map."
+        data_tests:
+          - not_null
+      - name: ga4_property_id
+        description: "Numeric GA4 property id."
+      - name: project_name
+        description: "Business-facing project name for the dashboard filter."
+        data_tests:
+          - not_null
+      - name: domain
+        description: "Public-facing domain. Join key to int_ads_landing_page_day_cost for ad spend by project."
+        data_tests:
+          - not_null
+      - name: product_type
+        description: "'quiz' or 'search' -- which funnel vocabulary this project uses."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['quiz', 'search']
+      - name: funnel_signal
+        description: "Which raw GA4 field(s) int_ga4_funnel_sessions reads to derive this project's funnel value. See seed_ga4_payment_account_map.yml for the full explanation per value."
+      - name: has_ga4_export
+        description: "Whether this project has usable raw GA4 event data today. False for tracelo (aggregate-only export) and fitday (no export at all)."
+        data_tests:
+          - not_null
+      - name: exclusion_reason
+        description: "Why has_ga4_export is false. Null when true."
+
+  - name: dim_product_payment_map
+    description: >
+      Every PSP account currently ingested (Stripe + Solidgate), with a product name and
+      the GA4 property of that product. Stripe product_name comes straight from ingested
+      data (bronze_stripe.stripe_accounts.product). Solidgate has no product field, so its
+      product_name and every ga4_property_id depend on the hand-maintained
+      seed_ga4_payment_account_map: Stripe accounts are matched on the seed's product_name
+      (the product domain), Solidgate accounts on the seed's account_key. An account or
+      product missing from the seed gets a null ga4_property_id (and, for Solidgate, a null
+      product_name), so a new product or GA4 property must be added to that seed.
+      team_name is always null: there is no source of team ownership anywhere in this warehouse,
+      so it can't be populated without a hand-maintained input from outside the pipeline
+      (e.g. a product/team roster). The column is kept so that input can be left-joined
+      in later on (payment_provider, psp_account_name) without changing this model.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - payment_provider
+              - psp_account_name
+    columns:
+      - name: payment_provider
+        description: "'stripe' or 'solidgate'."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['stripe', 'solidgate']
+
+      - name: psp_account_name
+        description: "Human-readable PSP account name -- Stripe's account name, or Solidgate's _elt_account_name."
+        data_tests:
+          - not_null
+
+      - name: stripe_account_id
+        description: "Stripe account id (bronze_stripe.stripe_accounts.id). Null for solidgate rows."
+        data_tests:
+          - relationships:
+              arguments:
+                to: source('bronze_stripe', 'stripe_accounts')
+                field: id
+
+      - name: solidgate_account_name
+        description: "Solidgate _elt_account_name. Null for stripe rows. Same value as psp_account_name for solidgate rows."
+
+      - name: product_name
+        description: >
+          Best-effort product name. For stripe, bronze_stripe.stripe_accounts.product.
+          For solidgate, the product domain (product_name) from seed_ga4_payment_account_map
+          when that account has a stitched GA4 property -- same format as stripe, so one
+          product shares one name across PSPs. Null otherwise, since solidgate has no
+          product field anywhere in ingested data.
+
+      - name: product_name_source
+        description: "Which source filled product_name, or null if nothing did."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - 'stripe_accounts.product'
+                  - 'seed_ga4_payment_account_map.product_name'
+              config:
+                where: "product_name_source is not null"
+
+      - name: ga4_property_id
+        description: >
+          Numeric GA4 property id for this PSP account. Stripe accounts: joined on the product domain
+          (stripe_accounts.product = seed_ga4_payment_account_map.product_name). Solidgate accounts:
+          joined on seed account_key, so only Solidgate accounts a property stitches against get one.
+          Null otherwise.
+
+      - name: posthog_id
+        description: >
+          PostHog Production project id of the product, from seed_ga4_payment_account_map.posthog_id,
+          joined like ga4_property_id. Null otherwise.
+
+      - name: amplitude_project_id
+        description: >
+          Amplitude PROD project id (string) of the product, from seed_amplitude_project_map.
+          Equals the `_TABLE_SUFFIX` of the `events_all` wildcard source (`EVENTS_<id>`), so billing,
+          GA4 and Amplitude join through this one row. Null for products with no Amplitude project
+          (marked in seed_ga4_payment_account_map.amplitude_not_applicable_reason). Stage projects
+          are in seed_amplitude_project_map; payments are always prod, so they are not repeated here.
+
+      - name: team_name
+        description: >
+          Always null -- no team-ownership source exists in ingested data. Kept as a
+          column for a future manual mapping to be joined in without a schema change.

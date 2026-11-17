@@ -1,0 +1,204 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch: {}
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ruff lint + format check. Runs on every PR (develop and main).
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.17.3"
+          args: "check"
+
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: "0.17.3"
+          args: "format --check"
+
+  # Fails if code requires an env var that isn't set where it runs: .env.ci (DAG parse in CI) and
+  # the Astro dev and prod deployments. See scripts/check_env_vars.py.
+  # Variables come from Astro's environment manager (resolved, incl. workspace-linked ones) and
+  # secret values are not exported (no --include-secrets). Only key names are compared. The
+  # Astro token is optional so PRs from forks (no secrets) skip the deployment checks instead of
+  # failing.
+  env-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The secret is only exposed to the steps that need it, never to the installer.
+      - name: Detect Astro token
+        id: token
+        env:
+          ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
+        run: |
+          if [ -n "$ASTRO_API_TOKEN" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; fi
+
+      # Pinned release + checksum instead of piping install.astronomer.io into sudo bash.
+      # To upgrade: pick a release, copy the linux_amd64 line of its astro_<version>_checksums.txt.
+      - name: Install Astro CLI
+        if: steps.token.outputs.present == 'true'
+        env:
+          ASTRO_CLI_VERSION: "1.46.0"
+          ASTRO_CLI_SHA256: bf63dfbfc8373317d0aa0abdd6307f75c3890c0691483470c682054516f79dcf
+        run: |
+          tarball="astro_${ASTRO_CLI_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$tarball" "https://github.com/astronomer/astro-cli/releases/download/v${ASTRO_CLI_VERSION}/${tarball}"
+          echo "${ASTRO_CLI_SHA256}  $RUNNER_TEMP/$tarball" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/astro-bin"
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP/astro-bin" astro
+          echo "$RUNNER_TEMP/astro-bin" >> "$GITHUB_PATH"
+
+      - name: Export Astro deployment variables
+        id: astro
+        if: steps.token.outputs.present == 'true'
+        env:
+          ASTRO_API_TOKEN: ${{ secrets.ASTRO_API_TOKEN }}
+          ASTRO_DEV_DEPLOYMENT_ID: ${{ vars.ASTRO_DEV_DEPLOYMENT_ID }}
+          ASTRO_PROD_DEPLOYMENT_ID: ${{ vars.ASTRO_PROD_DEPLOYMENT_ID }}
+        run: |
+          astro env variable export --deployment-id "$ASTRO_DEV_DEPLOYMENT_ID" --output "$RUNNER_TEMP/dev.env" > /dev/null
+          astro env variable export --deployment-id "$ASTRO_PROD_DEPLOYMENT_ID" --output "$RUNNER_TEMP/prod.env" > /dev/null
+          echo "args=--env-file dev=$RUNNER_TEMP/dev.env --env-file prod=$RUNNER_TEMP/prod.env" >> "$GITHUB_OUTPUT"
+
+      - name: Check required env vars
+        run: python scripts/check_env_vars.py --env-file ci=.env.ci ${{ steps.astro.outputs.args }}
+
+      - name: Remove exported variables
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/dev.env "$RUNNER_TEMP"/prod.env
+
+  # Builds the same Docker image used by Astro deployment and runs DAG parsing plus the full pytest suite.
+  # Tests mock external services/credentials, so no real BigQuery/GCS calls are made.
+  # .env.ci contains dummy values only and is generated from the real .env via scripts/generate_env_ci.py.
+  # When new env vars are added, update your local .env, regenerate .env.ci, and commit it.
+  # Gated to PRs targeting main (release PRs): the image build is slow.
+  airflow-validate:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.base.ref == 'main' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Astro CLI
+        run: curl -sSL install.astronomer.io | sudo bash -s
+
+      - name: Use CI env vars
+        run: cp .env.ci .env
+
+      - name: astro dev parse
+        run: astro dev parse
+
+      - name: astro dev pytest
+        run: astro dev pytest
+
+  # dbt test against prod bronze/silver/gold via a dedicated service account with BigQuery Editor
+  # access, so Elementary's anomaly tests and hooks can write to the `elementary` dataset.
+  # Gated to PRs targeting main (release PRs) only
+  dbt-test:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.base.ref == 'main' || github.event_name == 'workflow_dispatch'
+    defaults:
+      run:
+        working-directory: dags/dbt/bigquery_dbt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.CI_GBQ_SVC }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # Version pinned to match the dbt venv built in the Dockerfile.
+      - name: Install dbt-bigquery
+        run: pip install dbt-bigquery==1.11.3
+
+      - name: dbt deps
+        run: dbt deps
+
+      # Cross-source tests (e.g. test_customer_attribution_covers_mrr_customers) only hold right
+      # after their parent models are rebuilt together, which dbt_dag guarantees via
+      # should_detach_multiple_parents_tests. CI builds nothing and reads prod tables refreshed
+      # on independent schedules, so they'd fail on table skew rather than a real defect.
+      - name: dbt test
+        run: |
+          dbt test --profiles-dir . --project-dir . --vars '{run_cross_source_tests: false}'
+        env:
+          DBT_GCP_PROJECT: ${{ vars.DBT_GCP_PROJECT }}
+          DBT_BQ_DATASET: dbt_analytics
+          DBT_BQ_LOCATION: ${{ vars.DBT_BQ_LOCATION }}
+          # The ~800 tests are BigQuery-bound (about 2 s each), so more threads cut the runtime.
+          DBT_THREADS: 16
+          AIRFLOW_VAR_BQ_BRONZE_DATASET: ${{ vars.BQ_BRONZE_DATASET }}
+          AIRFLOW_VAR_BQ_SILVER_DATASET: ${{ vars.BQ_SILVER_DATASET }}
+          AIRFLOW_VAR_BQ_GOLD_DATASET: ${{ vars.BQ_GOLD_DATASET }}
+          # Real (non-secret) GA4 property IDs -- see seeds/seed_ga4_payment_account_map.csv.
+          # Required at dbt parse time by models/bronze/ga4_transactions.yml sources.
+          GA4_PROPERTY_ID_OQG1: ${{ vars.GA4_PROPERTY_ID_OQG1 }}
+          GA4_PROPERTY_ID_QCIO: ${{ vars.GA4_PROPERTY_ID_QCIO }}
+          GA4_PROPERTY_ID_LOCATION_TOOL: ${{ vars.GA4_PROPERTY_ID_LOCATION_TOOL }}
+          GA4_PROPERTY_ID_QR_GENERATOR_AI: ${{ vars.GA4_PROPERTY_ID_QR_GENERATOR_AI }}
+          GA4_PROPERTY_ID_INFOCHECKER: ${{ vars.GA4_PROPERTY_ID_INFOCHECKER }}
+          GA4_PROPERTY_ID_CHATBOX_AI: ${{ vars.GA4_PROPERTY_ID_CHATBOX_AI }}
+          GA4_PROPERTY_ID_IQ_CENTER: ${{ vars.GA4_PROPERTY_ID_IQ_CENTER }}
+          GA4_PROPERTY_ID_VIEW_PAGE: ${{ vars.GA4_PROPERTY_ID_VIEW_PAGE }}
+          GA4_PROPERTY_ID_SIMPL_AI: ${{ vars.GA4_PROPERTY_ID_SIMPL_AI }}
+          GA4_PROPERTY_ID_OPENGEN_AI: ${{ vars.GA4_PROPERTY_ID_OPENGEN_AI }}
+          GA4_PROPERTY_ID_PUBLICREGISTRY: ${{ vars.GA4_PROPERTY_ID_PUBLICREGISTRY }}
+          GA4_PROPERTY_ID_REVERSLY: ${{ vars.GA4_PROPERTY_ID_REVERSLY }}
+          GA4_PROPERTY_ID_FILES_EDITOR: ${{ vars.GA4_PROPERTY_ID_FILES_EDITOR }}
+          GA4_PROPERTY_ID_TRACELO: ${{ vars.GA4_PROPERTY_ID_TRACELO }}
+          GA4_PROPERTY_ID_FITDAY: ${{ vars.GA4_PROPERTY_ID_FITDAY }}
+          GA4_PROPERTY_ID_DOCUHERO: ${{ vars.GA4_PROPERTY_ID_DOCUHERO }}
+          GA4_PROPERTY_ID_CHAT_APP: ${{ vars.GA4_PROPERTY_ID_CHAT_APP }}
+          GA4_PROPERTY_ID_TRAVEL_DOCUMENT_US: ${{ vars.GA4_PROPERTY_ID_TRAVEL_DOCUMENT_US }}
+          AMPLITUDE_PROPERTY_ID_FITDAY: ${{ vars.AMPLITUDE_PROPERTY_ID_FITDAY }}
+          AMPLITUDE_PROPERTY_ID_REVERSLY: ${{ vars.AMPLITUDE_PROPERTY_ID_REVERSLY }}
+          AMPLITUDE_PROPERTY_ID_PUBLICREGISTRY: ${{ vars.AMPLITUDE_PROPERTY_ID_PUBLICREGISTRY }}
+          AMPLITUDE_PROPERTY_ID_INFOCHECKER: ${{ vars.AMPLITUDE_PROPERTY_ID_INFOCHECKER }}
+          AMPLITUDE_PROPERTY_ID_DOCUHERO: ${{ vars.AMPLITUDE_PROPERTY_ID_DOCUHERO }}
+          AMPLITUDE_PROPERTY_ID_IQCENTER: ${{ vars.AMPLITUDE_PROPERTY_ID_IQCENTER }}
+          AMPLITUDE_PROPERTY_ID_OPENGEN_AI: ${{ vars.AMPLITUDE_PROPERTY_ID_OPENGEN_AI }}
+          AIRFLOW_VAR_AMPLITUDE_DATASET: ${{ vars.AIRFLOW_VAR_AMPLITUDE_DATASET }}
+          AIRFLOW_VAR_AMPLITUDE_STAGE_DATASET: ${{ vars.AIRFLOW_VAR_AMPLITUDE_STAGE_DATASET }}
+
+
+  pr-checks:
+    runs-on: ubuntu-latest
+    needs: [lint, env-check, airflow-validate, dbt-test]
+    if: always()
+    steps:
+      - name: Fail if any check failed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1

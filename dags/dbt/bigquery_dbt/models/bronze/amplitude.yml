@@ -1,0 +1,95 @@
+version: 2
+
+# Amplitude's native BigQuery export. One table per Amplitude project, named EVENTS_<project id>
+# by the sync, in the dataset set by AIRFLOW_VAR_AMPLITUDE_DATASET (prod data; the CVR alert
+# DAG reads AIRFLOW_VAR_AMPLITUDE_STAGE_DATASET instead). Not produced by Airflow, so there is
+# no Asset for it -- source freshness covers staleness.
+# Prod projects only. Adding a product = one table block here + a row in seed_product_registry.
+# Exception: events_all (every prod project, via wildcard) is read by silver/amplitude/
+# int_amplitude_experiment_events for GrowthBook, so new projects and experiments are picked up
+# without a table block here. It is not tied to seed_product_registry.
+sources:
+  - name: amplitude
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_AMPLITUDE_DATASET') }}"
+    description: "Amplitude native BigQuery export (one table per project)"
+    config:
+      tags: [ "amplitude", "bronze" ]
+      # event_time is the device clock (seen from 1978 to 2042), so freshness uses server time
+      loaded_at_field: server_upload_time
+      freshness:
+        warn_after: {count: 6, period: hour}
+        error_after: {count: 24, period: hour}
+
+    tables:
+      - name: events_infochecker
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_INFOCHECKER') }}"
+        description: "InfoChecker prod project. Pairs with Solidgate PS_PROD_INFOCHECKER and Stripe acct_1RoZfRALzAR0Hu3M."
+      - name: events_publicregistry
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_PUBLICREGISTRY') }}"
+        description: "Public Registry prod project. Pairs with Solidgate BGR_PROD_PUBLICREGISTRY_US and Stripe acct_1Tp7XDA90JBVcIeI."
+      - name: events_reversly
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_REVERSLY') }}"
+        description: "Reversly prod project. Pairs with Solidgate REVERSELY_LIVE and Stripe acct_1U5mQoATU58Qu7Eg."
+      - name: events_fitday
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_FITDAY') }}"
+        description: "FitDay prod project (web + iOS/Android app). Stripe acct_1TjbAoAcq7wjiSGg only; no GA4 export."
+      - name: events_docuhero
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_DOCUHERO') }}"
+        description: "Docuhero prod project (887536). Only one Amplitude project exists for docuhero, no stage."
+        config:
+          # Pre-launch: EVENTS_887536 does not exist until the project receives its first events.
+          # Remove this override once the table is populated so the source-level freshness applies.
+          freshness: null
+      - name: events_iqcenter
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_IQCENTER') }}"
+        description: "IQ Center prod project (875746). Pairs with Solidgate QUIZ_PROD_IQCENTER_LIVE and Stripe acct_1TbtvaAPsISuQDcS."
+      - name: events_opengen_ai
+        identifier: "EVENTS_{{ env_var('AMPLITUDE_PROPERTY_ID_OPENGEN_AI') }}"
+        description: "OpenGen prod project (877651). Pairs with Solidgate OPN_PROD and Stripe acct_1U3XuvAaaCSb5BaF."
+
+      - name: events_all
+        identifier: "EVENTS_*"
+        description: "Wildcard over every prod Amplitude project table; _TABLE_SUFFIX is the project id. Used by int_amplitude_experiment_events."
+      - name: merge_users_infochecker
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_INFOCHECKER') }}"
+        description: "InfoChecker merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null
+      - name: merge_users_publicregistry
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_PUBLICREGISTRY') }}"
+        description: "Public Registry merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null
+      - name: merge_users_reversly
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_REVERSLY') }}"
+        description: "Reversly merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null
+      - name: merge_users_fitday
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_FITDAY') }}"
+        description: "FitDay merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null
+      - name: merge_users_docuhero
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_DOCUHERO') }}"
+        description: "Docuhero merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null
+      - name: merge_users_iqcenter
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_IQCENTER') }}"
+        description: "IQ Center merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null
+      - name: merge_users_opengen_ai
+        identifier: "MERGE_USERS_{{ env_var('AMPLITUDE_PROPERTY_ID_OPENGEN_AI') }}"
+        description: "OpenGen merged Amplitude IDs."
+        config:
+          freshness: null
+          loaded_at_field: null

@@ -1,0 +1,23 @@
+ga4_property_name,product_name,ga4_property_id,has_ga4_export,payment_source,account_key,is_stitchable,stitch_exclusion_reason,posthog_id,amplitude_not_applicable_reason,is_dashboard_project,project_name,product_type,funnel_signal,ga4_export_exclusion_reason
+oqg1,online-qr-generator.com,372056873,true,stripe,acct_1PgbrSJaoNXdYiB1,true,,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+qcio,qr-code.io,454537796,true,stripe,acct_1Pgc8ILQzI0D4HQZ,true,,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+location_tool,location-tool.com,462040386,true,stripe,acct_1PctqCA3dWaWNtKw,true,,,not applicable: product has no Amplitude project (confirmed by Marie),true,Location-Tool,search,page_version,
+qr_generator_ai,qr-generator.ai,479933657,true,solidgate,QR_PROD_QGA_LIVE,true,,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+infochecker,infochecker.com,473709575,true,solidgate,PS_PROD_INFOCHECKER,true,,,,true,Infochecker,search,page_version_lookup,
+chatbox_ai,chat-box.ai,518695982,true,solidgate,CHATBOX_PROD,true,,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+iq_center,iqcenter.com,538823059,true,solidgate,QUIZ_PROD_IQCENTER_LIVE,true,,,,true,IQ Center,quiz,test_type,
+files_editor,files-editor.com,479938817,true,,,false,"sends a random UUID as transaction_id, not the processor's own payment_intent/order id",315092,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+view_page,view.page,511783360,true,,,false,emits no transaction_id on any event,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+simpl_ai,simpl.ai,545963452,true,solidgate,CHATBOT_PROD_SIMPL,true,,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+travel_document_us,travel.document.us,557520559,false,,,false,no BigQuery export,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+chat_app,chat-app.ai,557159531,false,,,false,no BigQuery export,,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+fitday,fitday.ai,549681578,false,,,false,no BigQuery export,,,true,Fitday,quiz,,No BigQuery Export dataset exists for this property yet -- product is still in development
+giftmusic,giftmusic.com,551891251,false,,,false,"export linked, no transaction_ids yet",,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+opengen_ai,opengen.ai,551911830,true,solidgate,OPN_PROD,true,,,,false,,,,
+publicregistry,publicregistry.us,547826894,true,solidgate,BGR_PROD_PUBLICREGISTRY_US,true,,,,true,Public Registry,search,url_path,
+qr_generator_com,qr-generator.com,557961283,false,,,false,"export linked, no transaction_ids yet",,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+reversly,reversly.com,550856144,true,solidgate,REVERSELY_LIVE,true,,,,true,Reversly,search,page_version_lookup,
+file_editor,file-editor.com,555611796,false,,,false,"export linked, no transaction_ids yet",,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+tracelo,tracelo.com,396748120,false,,,false,no BigQuery export,,not applicable: product has no Amplitude project (confirmed by Marie),true,Tracelo,search,,"Only aggregated GA4 Data Transfer report tables exist (bronze.p_ga4_*_396748120) -- no transaction_id/event_params/session id, so no funnel signal or payment join is possible yet"
+giftmusic_uat_widelab,,552403491,false,,,false,"export linked, no transaction_ids yet",,not applicable: product has no Amplitude project (confirmed by Marie),false,,,,
+docuhero,docuhero.com,559806806,true,,,false,"sends no purchase event or transaction_id yet",674694,,false,,,,

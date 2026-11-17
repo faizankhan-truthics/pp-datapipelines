@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: anytrack_reconciliation
+    description: >
+      AnyTrack <-> files_editor billing reconciliation at event_date x event_name
+      grain, for the Preset dashboard comparing Bravo DB counts against AnyTrack
+      counts. FULL OUTER JOIN of the 6 silver event-count models (3 files_editor,
+      3 AnyTrack) -- see models/silver/anytrack_recon/ for the per-event-type
+      classification logic.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        description: "Signup, DPF/CFT Trial/Activation/Renewal, or the Refund (...) variant of each subscription event."
+        data_tests: [not_null]
+      - name: bravo_count
+        description: "Count from files_editor's own Postgres DB (via Starburst). 0 when this event_date/event_name has no Bravo-side match."
+        data_tests: [not_null]
+      - name: anytrack_count
+        description: "Count from AnyTrack. 0 when this event_date/event_name has no AnyTrack-side match."
+        data_tests: [not_null]

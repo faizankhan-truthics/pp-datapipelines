@@ -1,0 +1,69 @@
+version: 2
+
+models:
+  - name: net_revenue_daily
+    description: >
+      Unified daily net revenue across Stripe and Solidgate, combining gross
+      revenue, PSP fees, refunds, and disputes into a single USD figure per
+      account/product/day. Avoids double counting between processors:
+      Solidgate sales/refunds/disputes processed through Stripe are excluded
+      from the Solidgate side and counted from the Stripe ledger instead
+      (Solidgate PSP fees are always kept in full, since Solidgate charges
+      fees on Stripe-processed transactions too).
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date
+              - account_name
+              - product_name
+
+    columns:
+      - name: date
+        description: Accounting date (Solidgate) or charge/transaction date (Stripe).
+
+      - name: account_name
+        description: Raw Solidgate or Stripe account name.
+        tests:
+          - not_null
+
+      - name: reporting_account
+        description: Normalized account used for reporting and dashboard filters.
+        tests:
+          - not_null
+
+      - name: reporting_product
+        description: Normalized business product name used for reporting.
+        tests:
+          - not_null
+
+      - name: product_name
+        description: Subscription or plan-level product name.
+        tests:
+          - not_null
+
+      - name: gross_revenue_usd
+        description: Gross revenue in USD, from Solidgate SALEs and Stripe charges.
+        tests:
+          - not_null
+
+      - name: psp_fees_usd
+        description: Total PSP and payment-processing fees in USD, from both processors.
+        tests:
+          - not_null
+
+      - name: refunds_usd
+        description: Total refunds in USD, from both processors.
+        tests:
+          - not_null
+
+      - name: disputes_usd
+        description: Net disputes and chargebacks in USD, including reversals, from both processors.
+        tests:
+          - not_null
+
+      - name: net_revenue_usd
+        description: Gross revenue minus PSP fees, refunds, and disputes.
+        tests:
+          - not_null

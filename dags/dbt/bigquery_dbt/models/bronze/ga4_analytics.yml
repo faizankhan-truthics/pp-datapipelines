@@ -1,0 +1,29 @@
+version: 2
+
+# NOTE TO FUTURE EDITORS: do not paste literal Jinja syntax examples into comments in this file --
+# Jinja renders the whole file including comments, so example syntax gets executed for real (this
+# exact mistake broke this file's first draft).
+#
+# No finalized `events_YYYYMMDD` tables exist yet for any property -- only the rolling ~22-day
+# `events_intraday_*` buffer (GA4 Standard's 1M-events/property/day cap). See
+# int_ga4_campaign_day_metrics.sql for how the incremental model works around that ceiling.
+sources:
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_VIEW_PAGE') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_VIEW_PAGE') }}"
+    tables:
+      - name: "events_intraday_*"
+        description: "Raw GA4 event export, wildcard-sharded by day (rolling ~22-day intraday buffer)."
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_FILES_EDITOR') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_FILES_EDITOR') }}"
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_DOCUHERO') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_DOCUHERO') }}"
+    tables:
+      - name: "events_intraday_*"
+        description: "Raw GA4 event export for the docuhero property (559806806), wildcard-sharded by day."

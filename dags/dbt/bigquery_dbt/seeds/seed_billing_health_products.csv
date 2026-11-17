@@ -1,0 +1,21 @@
+product_key,product_name,entity,solidgate_account,stripe_product,payments_owner_slack_id,product_owner_slack_id,is_active
+chat_box,Chat-Box,Apollo,CHATBOX_PROD,chat-box.ai,U0BBWE2T6TC U0B1852M2U9,,true
+files_editor,Files-Editor,Apollo,PDF_PROD_FILES_EDITOR,files-editor.com,U0BBWE2T6TC U0B1852M2U9,,true
+giftmusic,GiftMusic,Apollo,MSC_PROD,giftmusic.com,U0BBWE2T6TC U0B1852M2U9,,true
+qr_generator_ai,QR Generator AI,Apollo,QR_PROD_QGA_LIVE,qr-generator.ai,U0BBWE2T6TC U0B1852M2U9,,true
+qr_generator_com,QR-Generator.com,Apollo,,qr-generator.com,U0BBWE2T6TC U0B1852M2U9,,true
+online_qr_generator,Online QR Generator,Apollo,,online-qr-generator.com,U0BBWE2T6TC U0B1852M2U9,,true
+qr_code_io,QR Code IO,Apollo,,qr-code.io,U0BBWE2T6TC U0B1852M2U9,,true
+opengen,OpenGen,Apollo,OPN_PROD,opengen.ai,U0BBWE2T6TC U0B1852M2U9,,true
+simpl_ai,Simpl.ai,Apollo,CHATBOT_PROD_SIMPL,simpl.ai,U0BBWE2T6TC U0B1852M2U9,,true
+docuhero,DocuHero,Apollo,,docuhero.com,U0BBWE2T6TC U0B1852M2U9,,true
+infochecker,InfoChecker,Strategic Outsourcing,PS_PROD_INFOCHECKER,infochecker.com,U0BBWE2T6TC U0B1852M2U9,,true
+iq_center,IQ Center,Strategic Outsourcing,QUIZ_PROD_IQCENTER_LIVE,iqcenter.com,U0BBWE2T6TC U0B1852M2U9,,true
+location_tool,Location-Tool,Strategic Outsourcing,,location-tool.com,U0BBWE2T6TC U0B1852M2U9,,true
+tracelo,Tracelo,Strategic Outsourcing,,tracelo.com,U0BBWE2T6TC U0B1852M2U9,,true
+reversly,Reversly,Strategic Outsourcing,REVERSELY_LIVE,reversly.com,U0BBWE2T6TC U0B1852M2U9,,true
+fitday,FitDay,Strategic Outsourcing,,fitday.ai,U0BBWE2T6TC U0B1852M2U9,,true
+public_registry,Public Registry,Strategic Outsourcing,BGR_PROD_PUBLICREGISTRY_US,publicregistry.us,U0BBWE2T6TC U0B1852M2U9,,true
+documentus,DocumentUS,Strategic Outsourcing,,travel.document.us,U0BBWE2T6TC U0B1852M2U9,,true
+files_convert,Files Convert,Strategic Outsourcing,,files-convert.com,U0BBWE2T6TC U0B1852M2U9,,true
+safetraveler,SafeTraveler,Strategic Outsourcing,,safetraveler.us,U0BBWE2T6TC U0B1852M2U9,,true

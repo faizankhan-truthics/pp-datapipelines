@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: growth_rate_mrr_monthly
+    description: >
+      Physical monthly MRR growth table backing the Preset Growth Rate chart.
+      Month-end USD MRR per account (selected Solidgate and Stripe accounts),
+      with month-over-month change and growth rate. Full history is kept
+      (no filter before LAG); Preset filters dates downstream.
+      Grain: month x account_name.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - month
+              - account_name
+
+    columns:
+      - name: month
+        description: "First day of the month."
+        data_tests:
+          - not_null
+
+      - name: account_name
+        description: "Solidgate account name or Stripe account label."
+        data_tests:
+          - not_null
+
+      - name: ending_mrr
+        description: "Month-end MRR in USD (last snapshot of the month)."
+        data_tests:
+          - not_null
+
+      - name: previous_month_mrr
+        description: "Prior month's ending_mrr for the same account; NULL for the first month."
+
+      - name: mrr_change_usd
+        description: "ending_mrr minus previous_month_mrr."
+
+      - name: growth_rate
+        description: "mrr_change_usd / previous_month_mrr; NULL when previous is 0 or missing."

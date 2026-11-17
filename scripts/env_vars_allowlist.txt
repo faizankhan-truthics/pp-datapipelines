@@ -1,0 +1,5 @@
+# Names check_env_vars.py skips: not set through Astro env vars.
+# One per line. Say why next to each entry.
+
+# Set by the dbt DAG code from Variable GCP_PROJECT_ID when it builds the dbt subprocess env.
+DBT_GCP_PROJECT

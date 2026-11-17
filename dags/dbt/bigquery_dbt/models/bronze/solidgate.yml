@@ -1,0 +1,82 @@
+version: 2
+
+sources:
+  - name: bronze_solidgate
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: "Raw Solidgate tables"
+    config:
+      tags: [ "solidgate", "bronze" ]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: solidgate_card_orders
+        description: "Credit and debit card transactions"
+      - name: solidgate_chargebacks
+        description: "Chargeback events (TC15)"
+      - name: apm_orders
+        identifier: solidgate_apm_orders
+        description: "Alternative Payment Methods (Ignored for VAMP)"
+      - name: subscriptions
+        identifier: solidgate_subscriptions
+        description: "Subscription plans and recurring contract details"
+      - name: subscriptions_release_history
+        identifier: solidgate_subscriptions_release_history
+        description: Append-only table of every retained daily Release Avro file for subscriptions
+      - name: solidgate_financial_entries
+      - name: solidgate_fraud_alerts
+        description: "Early fraud warning alerts (TC40)"
+      - name: solidgate_error_codes
+        description: "Error codes map. Readable and understandable definitions from SolidGate error codes page."
+        # Manually maintained reference table, not loaded on a schedule -- no _elt_update_timestamp.
+        config:
+          freshness: null
+          loaded_at_field: null
+        columns:
+          - name: code
+            description: "SolidGate error code (join key)."
+            tests:
+              - not_null
+              - unique
+          - name: error_message
+            description: "Human-readable error message for the code."
+          - name: error_next_step
+            description: "Recommended next steps for resolving the error."
+      - name: solidgate_mid_lookup
+        description: >
+          Reference table mapping a Solidgate merchant id (mid) to its underlying payment
+          service provider (PSP) and related merchant metadata. Manually maintained; loaded
+          from GCS via the gcs_external_to_bigquery_bronze DAG.
+        # Manually maintained reference table, not loaded on a schedule -- no _elt_update_timestamp.
+        config:
+          freshness: null
+          loaded_at_field: null
+        columns:
+          - name: mid
+            description: Solidgate merchant id (mid) — the join key back to solidgate_card_orders.mid.
+            tests:
+              - not_null
+              - unique
+
+          - name: connector
+            description: Raw connector/processor name as configured in Solidgate for this mid.
+
+          - name: psp_name
+            description: Normalized payment service provider name for this mid.
+            tests:
+              - not_null
+
+          - name: acquiring_bank
+            description: Acquiring bank associated with this mid.
+
+          - name: descriptor
+            description: Statement descriptor shown to the customer for charges on this mid.
+
+          - name: website
+            description: Website/site associated with this mid.
+
+          - name: mcc
+            description: Merchant category code (MCC) for this mid.

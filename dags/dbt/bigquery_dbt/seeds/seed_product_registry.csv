@@ -1,0 +1,17 @@
+product,is_in_scope,ga4_property_name,amplitude_source_table,anytrack_product,primary_visitor_source,site_domains,signup_events,activation_rule,trial_events,ga4_checkout_events,dormancy_days
+infochecker,true,infochecker,events_infochecker,infochecker,amplitude,infochecker.com,amplitude:signup_complete;ga4:signup,amplitude:page_view[screen_id=final_report],amplitude:trial_started;ga4:paid_trial;ga4:free_trial,paid_trial;free_trial;quit_trial_free;quit_trial_paid;add_on_charge;pdf_single_purchase;premium_single_report;premium_single_section;credit_pack_purchase,30
+publicregistry,true,publicregistry,events_publicregistry,publicregistry,amplitude,publicregistry.us,amplitude:signup_complete;ga4:signup,amplitude:page_view[screen_id=report_view];amplitude:page_view[screen_id=court_records_report_view],amplitude:trial_started;ga4:quit_email_paid_trial;ga4:back_button_paid_trial,purchase;add_on_charge;quit_email_paid_trial;back_button_paid_trial;pdf_one_time_charge,30
+reversly,true,reversly,events_reversly,reversly,amplitude,reversly.com,amplitude:signup_complete;ga4:signup,amplitude:page_view[screen_id=final_report],amplitude:trial_started;ga4:paid_trial;ga4:free_trial,paid_trial;free_trial;quit_trial_free;add_on_charge;pdf_single_purchase;pdf_unlimited_purchase;premium_single_report;premium_single_section;credit_pack_purchase,30
+fitday,true,,events_fitday,fitday,amplitude,fitday.ai,amplitude:signup_completed,amplitude:session_start,amplitude:trial_started,,30
+iqcenter,true,iq_center,events_iqcenter,iqcenter,amplitude,iqcenter.com,amplitude:signup_completed,amplitude:screen_presented[screen_id=report],amplitude:trial_started,paid_trial;free_trial;quit_trial_free;add_on_charge,30
+opengen_ai,true,opengen_ai,events_opengen_ai,opengen_ai,amplitude,opengen.ai,amplitude:signup_completed,amplitude:generation_completed,amplitude:trial_started,DPF Trial;DPF Purchase,30
+oqg,true,oqg1,,oqg,anytrack,online-qr-generator.com,anytrack:signup,,anytrack:Trial Purchase;anytrack:Second Trial Purchase,purchase,30
+qci,true,qcio,,qci,anytrack,qr-code.io,anytrack:signup,,anytrack:Trial Purchase;anytrack:Second Trial Purchase,purchase,30
+qga,true,qr_generator_ai,,qga,anytrack,qr-generator.ai,anytrack:signup,,anytrack:Trial Purchase;anytrack:Second Trial Purchase,purchase,30
+chatbox_ai,true,chatbox_ai,,chatbox_ai,anytrack,chat-box.ai,anytrack:sign_up,,anytrack:DPF Trial;anytrack:CFT Trial,DPF Trial;CFT Trial;DPF Purchase,30
+simpl_ai,true,simpl_ai,,simpl_ai,anytrack,simpl.ai,anytrack:sign_up,,anytrack:DPF Trial;anytrack:CFT Trial,DPF Trial;CFT Trial;DPF Purchase,30
+location_tool,true,location_tool,,location_tool,anytrack,location-tool.com,anytrack:signup,,anytrack:Trial Purchase (Anytrack);anytrack:Free Trial,purchase;support_charge_24_7;free_trial,30
+files_editor,true,files_editor,,files_editor;file_editor,anytrack,files-editor.com;file-editor.com,anytrack:signup,,anytrack:DPF Trial;anytrack:CFT Trial,dpf_trial;cft_trial,30
+tracelo,true,,,tracelo,anytrack,tracelo.com,anytrack:signup,,anytrack:Trial Purchase (Anytrack);anytrack:Free Trial,,30
+giftmusic,true,,,giftmusic,anytrack,giftmusic.com,anytrack:sign_up,,anytrack:DPF Trial,,30
+docuhero,true,docuhero,,docuhero,anytrack,docuhero.com,anytrack:signup,,anytrack:DPF Trial;anytrack:CFT Trial,,30

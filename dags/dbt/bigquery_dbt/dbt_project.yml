@@ -1,0 +1,145 @@
+
+# Name your project! Project names should contain only lowercase characters
+# and underscores. A good package name should reflect your organization's
+# name or the intended use of these models
+name: 'bigquery_dbt'
+version: '1.0.0'
+
+# This setting configures which "profile" dbt uses for this project.
+profile: 'bigquery_dbt'
+
+# These configurations specify where dbt should look for different types of files.
+# The `model-paths` config, for example, states that models in this project can be
+# found in the "models/" directory. You probably won't need to change these!
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:         # directories to be removed by `dbt clean`
+  - "target"
+
+# Inside the Airflow image, this is overridden (via the DBT_PACKAGES_INSTALL_PATH env var,
+# set in the Dockerfile) to an absolute path outside dags/, so it isn't wiped/re-fetched on
+# deploy.
+packages-install-path: "{{ env_var('DBT_PACKAGES_INSTALL_PATH', 'dbt_packages') }}"
+
+
+# Configuring models
+# Full documentation: https://docs.getdbt.com/docs/configuring-models
+
+# In this example config, we tell dbt to build all models in the example/
+# directory as views. These settings can be overridden in the individual model
+# files using the `{{ config(...) }}` macro.
+models:
+  bigquery_dbt:
+    # Config indicated by + and applies to all files under models/example/
+    silver:
+      +schema: "{{ env_var('AIRFLOW_VAR_BQ_SILVER_DATASET','placeholder_dataset') }}"
+      +materialized: incremental
+
+    gold:
+      +schema: "{{ env_var('AIRFLOW_VAR_BQ_GOLD_DATASET','placeholder_dataset') }}"
+      +materialized: view
+
+  # Elementary's own models (run/test results, anomaly history) land in a dedicated schema.
+  elementary:
+    +schema: elementary
+vars:
+  elementary:
+    days_back: 14
+    backfill_days: 2
+
+seeds:
+  bigquery_dbt:
+    +schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET','placeholder_dataset') }}"
+    history_fx:
+      +column_types:
+        date: datetime
+        close: string
+        base_currency: string
+    solidgate_error_codes:
+      +column_types:
+        code: string
+        error_message: string
+        error_next_step: string
+    seed_billing_health_products:
+      +column_types:
+        product_key: string
+        product_name: string
+        entity: string
+        solidgate_account: string
+        stripe_product: string
+        payments_owner_slack_id: string
+        product_owner_slack_id: string
+        is_active: bool
+    seed_billing_health_baselines:
+      +column_types:
+        product_key: string
+        section: string
+        metric: string
+        segment: string
+        baseline: float64
+        sd: float64
+        n_periods: int64
+        period_start: date
+        period_end: date
+        method: string
+    seed_billing_decline_reason_map:
+      +column_types:
+        code: string
+        decline_reason: string
+        decline_class: string
+        reason_source: string
+        stripe_match_share: float64
+        stripe_matches: int64
+    seed_ga4_payment_account_map:
+      +column_types:
+        ga4_property_id: string
+        has_ga4_export: bool
+        is_stitchable: bool
+        is_dashboard_project: bool
+        project_name: string
+        product_type: string
+        funnel_signal: string
+        ga4_export_exclusion_reason: string
+    seed_product_registry:
+      +column_types:
+        product: string
+        is_in_scope: bool
+        ga4_property_name: string
+        amplitude_source_table: string
+        anytrack_product: string
+        primary_visitor_source: string
+        site_domains: string
+        signup_events: string
+        activation_rule: string
+        trial_events: string
+        ga4_checkout_events: string
+        dormancy_days: int64
+    seed_kr2_channel_rules:
+      +column_types:
+        rule_id: string
+        check_order: int64
+        decision: string
+        channel_group: string
+        fallback_channel_group: string
+        product_match: string
+        source_match: string
+        medium_match: string
+        network_match: string
+        condition_key: string
+        reason: string
+    seed_kr2_domain_lists:
+      +column_types:
+        list_name: string
+        match_type: string
+        value: string
+    seed_product_payment_accounts:
+      +column_types:
+        product: string
+        source_system: string
+        account: string
+        note: string

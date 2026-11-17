@@ -1,0 +1,26 @@
+version: 2
+
+seeds:
+  - name: solidgate_error_codes
+    description: >
+      Reference mapping of Solidgate payment error codes to readable error
+      messages and recommended next steps. This table is intended for use
+      in dashboards, charts, reports, and payment error analysis.
+
+    columns:
+      - name: code
+        description: Solidgate payment error code.
+        data_type: string
+
+      - name: error_message
+        description: >
+          Human-readable explanation of the Solidgate error code,
+          suitable for display in dashboards and reports.
+        data_type: string
+
+      - name: error_next_step
+        description: >
+          Recommended next action for the error, such as retrying the
+          payment, taking customer action, contacting support, or
+          performing developer action.
+        data_type: string

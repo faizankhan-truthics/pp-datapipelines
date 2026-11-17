@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: bronze_zendesk
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    config:
+      tags: [ "zendesk", "bronze" ]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: zendesk_tickets
+        description: "Table with Zendesk Ticket objects; a single support request/conversation, including AI-generated intent/sentiment tags."
+      - name: zendesk_ticket_comments
+        description: "Table with Zendesk Ticket Comment objects; individual messages (public or internal) within a ticket's conversation."
+      - name: zendesk_users
+        description: "Table with Zendesk User objects; ticket requesters, submitters, and agents."

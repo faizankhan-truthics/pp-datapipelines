@@ -1,0 +1,116 @@
+version: 2
+
+models:
+  - name: int_ga4_campaign_day_metrics
+    description: >
+      GA4 attributable revenue and funnel counts (sessions, new_users) per property_id x
+      campaign_id x date. Unions every property with has_ga4_export = true in
+      seeds/seed_ga4_payment_account_map.csv (9 of 10 known properties -- simpl_ai excluded, no
+      BigQuery Export dataset exists for it), dedups on the event grain, and forward-fills
+      gclid + campaign_id within each session before aggregating. 
+
+    columns:
+      - name: campaign_day_key
+        description: "Surrogate key: property_id-campaign_id-date. Merge key for this model."
+        tests:
+          - not_null
+          - unique
+
+      - name: property_id
+        description: "GA4 property id."
+
+      - name: campaign_id
+        description: "Google Ads campaign id (as STRING), resolved via forward-fill within the session."
+
+      - name: date
+        description: "Event date (GA4's event_date, parsed from its native STRING 'YYYYMMDD' format)."
+        tests:
+          - not_null
+
+      - name: ga4_revenue_usd
+        description: "Sum of purchase event_value_in_usd where both campaign_id and gclid were resolved."
+
+      - name: sessions
+        description: "Distinct (user_pseudo_id, ga_session_id) pairs with a session_start event attributed to this campaign/day."
+
+      - name: new_users
+        description: "Distinct user_pseudo_id with a first_visit event attributed to this campaign/day."
+
+  - name: int_ads_campaign_day_cost
+    description: >
+      Google Ads cost per campaign_id x date, deduped to the latest snapshot per
+      (campaign_id, segments_date) before summing across device/network/slot segments. Sourced
+      from the single manager-account table covering all 10 sub-account customers.
+
+    columns:
+      - name: campaign_day_key
+        description: "Surrogate key: customer_id-campaign_id-date. Merge key for this model."
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        description: "Ads sub-account customer id."
+
+      - name: campaign_id
+        description: "Google Ads campaign id, cast to STRING to match the GA4 side."
+
+      - name: date
+        description: "segments_date -- the metric date (distinct from _DATA_DATE, the snapshot/export date)."
+        tests:
+          - not_null
+
+      - name: ads_cost
+        description: "metrics_cost_micros / 1e6, summed across segments at the latest snapshot. Native currency (see ads_Customer_2747379648 for currency_code per customer)."
+
+  - name: int_ads_landing_page_day_cost
+    description: >
+      Google Ads cost split by destination domain (project) x landing-page funnel x customer_id x date, sourced from
+      ads_LandingPageStats rather than ads_CampaignBasicStats -- campaigns/accounts carry no
+      project dimension, but the landing page URL each ad group sends clicks to does.
+      Deliberately not joined to campaign_id: campaign_name collides across different
+      campaign_ids, even within one customer_id (confirmed empirically), so name-matching would
+      fan out and inflate cost. Deduped to the latest snapshot per (customer_id, campaign_name,
+      ad_group_name, landing_page url, segments_date) before summing, same risk as
+      int_ads_campaign_day_cost.
+
+      customer_id is kept in the grain rather than collapsed: a domain can span several Ads
+      sub-accounts (publicregistry.us runs 6 -- Court, Financial, Crime, Property, Vital,
+      People & Property). Currency conversion must happen per customer_id before summing across
+      them to a domain total -- see project_roas_daily.sql, which is why currency_code isn't
+      resolved here.
+
+      funnel is the landing page URL's product/topic slug (walking, phone-lookup, adhd, track,
+      ...) with the language prefix and /quiz/ or /start/ wrapper stripped -- Manya's URL-based
+      Funnel definition, NOT a post-click funnel stage. Kept raw (calisthenics-m and
+      calisthenics-f stay distinct); bare language roots land in '(root)'.
+
+    columns:
+      - name: domain_funnel_customer_day_key
+        description: "Surrogate key: domain-funnel-customer_id-date. Merge key for this model."
+        tests:
+          - not_null
+          - unique
+
+      - name: domain
+        description: "Destination domain extracted from the landing page URL. Join key to dim_project.domain (seed_ga4_payment_account_map.product_name)."
+        tests:
+          - not_null
+
+      - name: funnel
+        description: "Landing-page URL slug, lower-cased, language prefix and /quiz|start/ wrapper stripped. '(root)' for slug-less URLs."
+        tests:
+          - not_null
+
+      - name: customer_id
+        description: "Ads sub-account customer id. Part of the grain, not collapsed -- see model description."
+        tests:
+          - not_null
+
+      - name: date
+        description: "segments_date -- the metric date (distinct from _DATA_DATE, the snapshot/export date)."
+        tests:
+          - not_null
+
+      - name: ads_cost
+        description: "metrics_cost_micros / 1e6, summed across ad groups/campaigns for this domain/customer at the latest snapshot. Native currency -- see ads_Customer_2747379648 for currency_code per customer_id."

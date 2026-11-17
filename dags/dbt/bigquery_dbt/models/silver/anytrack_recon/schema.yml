@@ -1,0 +1,161 @@
+version: 2
+
+models:
+  - name: int_files_editor_subscription_event_day_counts
+    description: >
+      files_editor subscription-lifecycle event counts (DPF/CFT Trial/Activation/
+      Renewal) at event_date x event_name grain, joined from the 5 raw
+      files_editor_db bronze tables. Feeds gold.anytrack_reconciliation's
+      bravo_count. See model SQL for the deleted_at and materialization rationale.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - DPF Trial
+                  - DPF Activation
+                  - DPF Renewal
+                  - CFT Trial
+                  - CFT Activation
+                  - CFT Renewal
+      - name: bravo_count
+        description: "Count of distinct order_id per event_date x event_name."
+        data_tests: [not_null]
+
+  - name: int_files_editor_refund_event_day_counts
+    description: >
+      files_editor refund-event counts, mirroring
+      int_files_editor_subscription_event_day_counts but for op.operation = 'refund'
+      rows. No 'Refund (CFT Trial)' -- CFT/DST trials aren't charged.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Refund (DPF Trial)
+                  - Refund (DPF Activation)
+                  - Refund (DPF Renewal)
+                  - Refund (CFT Activation)
+                  - Refund (CFT Renewal)
+      - name: bravo_count
+        description: "Count of distinct order_id per event_date x event_name."
+        data_tests: [not_null]
+
+  - name: int_files_editor_signup_event_day_counts
+    description: >
+      files_editor signup counts -- every billing_clients record regardless of
+      whether the client ever converted to a paying customer.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Signup]
+      - name: bravo_count
+        description: "Count of distinct billing_clients.id per event_date."
+        data_tests: [not_null]
+
+  - name: int_anytrack_subscription_event_day_counts
+    description: "AnyTrack-side counterpart to int_files_editor_subscription_event_day_counts, same event_name labels."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - DPF Trial
+                  - DPF Activation
+                  - DPF Renewal
+                  - CFT Trial
+                  - CFT Activation
+                  - CFT Renewal
+      - name: anytrack_count
+        description: "Count of distinct transaction_id per event_date x event_name."
+        data_tests: [not_null]
+
+  - name: int_anytrack_signup_event_day_counts
+    description: >
+      AnyTrack-side signup counts. AnyTrack reports this event as lowercase
+      'signup'; relabeled to 'Signup' here to match the files_editor side.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Signup]
+      - name: anytrack_count
+        description: "Count of distinct client_id per event_date."
+        data_tests: [not_null]
+
+  - name: int_anytrack_refund_event_day_counts
+    description: "AnyTrack-side counterpart to int_files_editor_refund_event_day_counts, same event_name labels."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - event_date
+              - event_name
+    columns:
+      - name: event_date
+        data_tests: [not_null]
+      - name: event_name
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Refund (DPF Trial)
+                  - Refund (DPF Activation)
+                  - Refund (DPF Renewal)
+                  - Refund (CFT Activation)
+                  - Refund (CFT Renewal)
+      - name: anytrack_count
+        description: "Count of distinct transaction_id per event_date x event_name."
+        data_tests: [not_null]

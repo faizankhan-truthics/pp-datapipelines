@@ -1,0 +1,17 @@
+version: 2
+
+sources:
+  - name: bronze_chargebackhit
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: "Raw ChargebackHit tables"
+    config:
+      tags: [ "chargebackhit", "bronze" ]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: chargebackhit_alerts
+        description: "Chargeback and fraud alerts from ChargebackHit"

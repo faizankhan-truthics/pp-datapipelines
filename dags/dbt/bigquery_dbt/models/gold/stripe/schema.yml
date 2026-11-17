@@ -1,0 +1,614 @@
+
+version: 2
+
+models:
+  - name: stripe_monthly_vamp
+    description: "Monthly mart for Visa Acquirer Monitoring Program — fraud dispute ratios by statement descriptor"
+    # Elementary model-level monitors (freshness + volume anomalies).
+    data_tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: Month_
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: Month_
+          config:
+            severity: warn
+    columns:
+      - name: Month_
+        description: "Month of report"
+        tests:
+          - not_null
+
+      - name: account
+        description: "Name of the account"
+        tests:
+          - not_null
+
+      - name: unique_key
+        description: "Concatenation of month and account, for deduplication"
+        tests:
+          - unique
+          - not_null
+
+      - name: visa_transactions
+        description: "Distinct count of the charges where payment_method.card.brand = visa"
+        tests:
+          - not_null
+
+      - name: charge_amount_usd
+        description: "Sum of USD amounts of charges where payment_method.card.brand = visa"
+        tests:
+          - not_null
+
+      - name: fraud_count
+        description: "Distinct count of fraud rows for visa charges, bucketed by the fraud warning's own created_date (no capture date exists for these)"
+        tests:
+          - not_null
+
+      - name: fraud_amount_usd
+        description: "Sum of USD amounts of the underlying charges for fraud rows in fraud_count"
+        tests:
+          - not_null
+
+      - name: dispute_count
+        description: "Distinct count of dispute rows for visa charges, bucketed by the dispute's own captured_date (falls back to created_date)"
+        tests:
+          - not_null
+
+      - name: dispute_amount_usd
+        description: "Sum of USD amounts of dispute rows in dispute_count"
+        tests:
+          - not_null
+
+      - name: vamp_count
+        description: "Sum of fraud and dispute counts"
+        tests:
+          - not_null
+
+      - name: vamp_volume
+        description: "Sum of USD amounts of fraud and dispute records"
+        tests:
+          - not_null
+
+      - name: vamp_ratio
+        description: "vamp count / charges count"
+        tests:
+          - not_null
+          - elementary.column_anomalies:
+              arguments:
+                timestamp_column: Month_
+                column_anomalies:
+                  - null_count
+                  - average
+              config:
+                severity: warn
+
+      - name: _elt_update_timestamp
+        description: "Latest time data ingestion etl ran. for incremental data processing"
+        tests:
+          - not_null
+
+
+  - name: stripe_monthly_vamp_estimate
+    description: >
+      Estimates the end-of-month Visa VAMP count and VAMP ratio based on the
+      current month's observed VAMP count and Visa transaction volume.
+
+    config:
+      contract:
+        enforced: false
+
+    columns:
+      - name: unique_key
+        description: >
+          Unique identifier for the monthly VAMP record.
+        tests:
+          - not_null
+          - unique
+
+      - name: Month_
+        description: >
+          Month associated with the VAMP metrics.
+
+      - name: vamp_count
+        description: >
+          Observed VAMP count for the current month.
+
+      - name: visa_transactions
+        description: >
+          Number of Visa transactions observed during the current month.
+
+      - name: estimated_eom_vamp_count
+        description: >
+          Projected VAMP count for the end of the month based on the current
+          VAMP count, elapsed days, and total days in the month.
+
+      - name: estimated_eom_vamp_ratio
+        description: >
+          Projected end-of-month VAMP ratio calculated using the estimated
+          VAMP count divided by the estimated Visa transaction count.
+
+      - name: _elt_update_timestamp
+        description: >
+          Timestamp indicating when the source record was last updated.
+        tests:
+          - not_null
+
+
+  - name: stripe_monthly_recon
+    description: "Monthly mart showing counts and usd amounts of charges, refunds, fraud warnings and disputes"
+    data_tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: reporting_month
+          config:
+            severity: warn
+    columns:
+      - name: reporting_month
+        description: "Month of report"
+        tests:
+          - not_null
+
+  - name: stripe_vamp_dashboard_overview
+    description: >
+      Rolling 5-month VAMP dashboard grain: account x month x statement descriptor,
+      trimmed to the top 11 descriptors by sales volume per account/month. Current
+      month rows also carry an end-of-month projection.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account_id
+              - calculated_statement_descriptor
+              - start_of_month
+    columns:
+      - name: account_id
+        description: "Stripe account id."
+        data_tests:
+          - not_null
+      - name: start_of_month
+        description: "Month this row's counts apply to."
+        data_tests:
+          - not_null
+      - name: calculated_statement_descriptor
+        description: "Descriptor shown on the customer's card statement."
+      - name: vamp_rate
+        description: >
+          (efw_count + dispute_count_non_rdr) / sales_count. Expected within [0, 1];
+          a value above 1 means EFW + non-RDR disputes exceed sales for that grain —
+          a join/coverage problem — so this only warns rather than failing the build.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                inclusive: true
+              config:
+                severity: warn
+      - name: projected_vamp_rate
+        description: >
+          vamp_rate scaled +10% and projected to end-of-month. Only populated for the
+          current month's row — see test_stripe_vamp_dashboard_overview_projected_current_month_only
+          — null for every other month. Same [0, 1] expectation as vamp_rate.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                inclusive: true
+              config:
+                severity: warn
+      - name: ce3_eligible_cards
+        description: >
+          Distinct cards (Stripe fingerprint, else customer|last4|exp_month|exp_year|brand;
+          customer is included because different cards can share last4 + expiry) with an
+          EFW this month that are Visa CE 3.0 history-eligible: >= 2 prior succeeded,
+          captured Visa charges on the same account, settled (captured_date) 120-365
+          days before the EFW date, with no dispute and no EFW on them. Visa's IP / device-id match
+          is not checked, so all CE 3.0 columns are an upper bound.
+      - name: ce3_eligible_efw
+        description: >
+          EFWs (per charge, same counting as efw_count) that are CE 3.0 history-eligible.
+          Always <= efw_count — see test_stripe_vamp_dashboard_overview_ce3_bounds.
+      - name: vamp_tnx_ce3_adjusted
+        description: "vamp_tnx - ce3_eligible_efw. Only EFWs are removed; disputes never are."
+      - name: vamp_rate_ce3_adjusted
+        description: "vamp_tnx_ce3_adjusted / sales_count. Same [0, 1] expectation as vamp_rate."
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+                inclusive: true
+              config:
+                severity: warn
+      - name: projected_vamp_tnx_ce3_adjusted
+        description: "projected_vamp_tnx logic applied to vamp_tnx_ce3_adjusted; current month only."
+      - name: projected_vamp_rate_ce3_adjusted
+        description: "projected_vamp_rate logic applied to vamp_rate_ce3_adjusted; current month only."
+
+  - name: stripe_emc_efm_report
+    description: >
+      Rolling 6-month Mastercard monitoring grain: account x month. Flags ECM
+      (Excessive Chargeback Merchant) and EFM (Excessive Fraud Merchant) thresholds,
+      using the prior month's Mastercard transactions as the denominator. Current month
+      rows also carry an end-of-month projection.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account_id
+              - start_of_month
+    columns:
+      - name: account_id
+        description: "Stripe account id."
+        data_tests:
+          - not_null
+      - name: start_of_month
+        description: "Month this row's counts apply to."
+        data_tests:
+          - not_null
+      - name: ecom_txn_count
+        description: "Succeeded Mastercard card charges captured in the month."
+        data_tests:
+          - not_null
+      - name: prior_month_txn_count
+        description: >
+          ecom_txn_count of the account's previous row that had payments. Denominator for
+          both rates. Null for an account's first month with payments.
+      - name: dispute_count_all
+        description: "Disputes on Mastercard charges, bucketed by dispute created date."
+        data_tests:
+          - not_null
+      - name: fraud_dispute_count
+        description: "Disputes with Mastercard fraud reason codes 4837 / 4863."
+        data_tests:
+          - not_null
+      - name: net_fraud_volume_usd
+        description: "Amount of fraud disputes (4837 / 4863), in USD."
+      - name: ecm_chargeback_rate_pct
+        description: "100 * dispute_count_all / prior_month_txn_count."
+      - name: efm_fraud_rate_pct
+        description: "100 * fraud_dispute_count / prior_month_txn_count."
+      - name: ecm_status
+        description: "HECM (300+ disputes and 3%+), ECM (100+ and 1.5%+), otherwise OK."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['HECM (300+ / 3%+)', 'ECM (100-299 / 1.5-2.99%)', 'OK']
+      - name: efm_breach
+        description: "1000+ transactions, $50k+ fraud volume and a 0.5%+ fraud rate."
+      - name: projected_ecm_status
+        description: >
+          ecm_status on the end-of-month projection (counts scaled to 31 days +5%). Only
+          populated for the current month's row, and null on the 1st of the month — see
+          test_stripe_emc_efm_report_projected_current_month_only.
+      - name: projected_efm_breach
+        description: "efm_breach on the end-of-month projection. Same population rule as projected_ecm_status."
+
+  - name: stripe_mrr_by_channel_daily
+    description: >
+      Daily MRR split by where the customer originally came from. The channel belongs to the
+      customer, not the payment — they are attributed once from the charge GA4 saw, and every
+      day they keep paying counts towards that channel. Customers we could not place appear as
+      `unattributed`, so the channels always add up to total MRR. Mirrors
+      solidgate_mrr_by_channel_daily for the Stripe-billed products.
+      KNOWN GAP: OQG (online-qr-generator.com) and QCI (qr-code.io) will show almost entirely
+      `unattributed` rows until their int_stripe_prices backfill runs — see
+      int_stripe_customer_attribution's header comment for the root cause.
+      Grain: snapshot_date x _elt_stripe_account_id x source x medium x campaign.
+    columns:
+      - name: snapshot_date
+        description: "The day these figures apply to."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: source
+        description: "Where the customer came from. `unattributed` when nothing matched."
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic."
+      - name: campaign
+        description: "The campaign that brought them in."
+      - name: campaign_id
+        description: "Google Ads campaign id, for joining to campaign spend."
+      - name: customers
+        description: "Customers from that source still paying on this day."
+        data_tests:
+          - not_null
+      - name: mrr_usd
+        description: >
+          What they are worth per month, in US dollars. Summing across every row for a day,
+          including unattributed, gives the same total as stripe_mrr_usd_daily.
+
+  - name: stripe_mrr_usd_daily
+    description: >
+      Daily MRR in USD per Stripe account (product). Local-currency MRR converted at
+      the rate as-of the snapshot date, falling back to the most recent rate held for
+      that currency. Grain: snapshot_date x _elt_stripe_account_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+    columns:
+      - name: snapshot_date
+        description: "Date the MRR value applies to."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Stripe account — the product dimension."
+        data_tests:
+          - not_null
+      - name: account_name
+        description: "Human-readable account name, resolved from bronze_stripe.stripe_accounts."
+      - name: mrr_usd
+        description: >
+          Total MRR converted to USD. Null when every currency active that day lacks an
+          exchange rate — see test_stripe_mrr_usd_currency_coverage.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: active_subscriptions
+        description: "Distinct subscriptions contributing MRR, counted at subscription grain."
+        data_tests:
+          - not_null
+      - name: customers
+        description: "Distinct customers contributing MRR, counted at subscription grain."
+        data_tests:
+          - not_null
+      - name: currencies
+        description: "Number of currencies contributing on this date."
+      - name: mrr_change_usd
+        description: "Change vs the previous day for the same account."
+      - name: mrr_change_pct
+        description: "Percentage change vs the previous day."
+
+  - name: stripe_mrr_waterfall_daily
+    description: >
+      Daily view of how recurring revenue is moving, per product. Shows new business,
+      expansion and contraction; the remaining movements are added as each one is built.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_stripe_account_id
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+    columns:
+      - name: snapshot_date
+        description: "The day these figures apply to."
+        data_tests:
+          - not_null
+      - name: _elt_stripe_account_id
+        description: "Which Stripe account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: account_name
+        description: "Human-readable account name, resolved from bronze_stripe.stripe_accounts."
+      - name: new_business_customers
+        description: "Customers who paid us for the first time that day."
+        data_tests:
+          - not_null
+      - name: new_business_mrr_usd
+        description: "What those new customers are worth per month, in US dollars."
+      - name: reactivation_customers
+        description: "Customers who had stopped paying and started again that day."
+        data_tests:
+          - not_null
+      - name: reactivation_mrr_usd
+        description: "What they are worth now, in US dollars. Their whole value, not the difference."
+      - name: expansion_customers
+        description: "Existing customers who started paying more that day."
+        data_tests:
+          - not_null
+      - name: expansion_mrr_usd
+        description: "How much more they are paying, in US dollars. The increase, not their new total."
+      - name: contraction_customers
+        description: "Existing customers who started paying less, without stopping altogether."
+        data_tests:
+          - not_null
+      - name: contraction_mrr_usd
+        description: "How much less they are paying, in US dollars. Negative. The decrease, not their new total."
+      - name: churn_customers
+        description: >
+          Customers who stopped paying us altogether that day. Leaves out anyone still on
+          a payment retry, and anyone who came back soon after.
+      - name: active_customers
+        description: "Everyone paying us that day. Gives the new-customer figure some context."
+        data_tests:
+          - not_null
+      - name: active_mrr_usd
+        description: "Total monthly recurring revenue that day, in US dollars."
+      - name: customers_missing_fx
+        description: >
+          Customers we could not convert because their currency has no exchange rate. They
+          still count as customers, but their value is missing from the dollar totals.
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: stripe_smmp_refund_dispute_rate
+    description: >
+      Mastercard SMMP refund and dispute rates per Stripe account over the trailing 30
+      days. Sales are succeeded Mastercard card charges captured in the window; disputes
+      and refunds on Mastercard charges are counted by their own created date. Only
+      accounts with at least one sale in the window appear.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account_id
+    columns:
+      - name: account_id
+        description: "Stripe account id."
+        data_tests:
+          - not_null
+      - name: account_name
+        description: "Stripe account name."
+      - name: network
+        description: "Card network. Always MasterCard."
+      - name: sales_count
+        description: "Distinct payment intents with a succeeded Mastercard card charge captured in the last 30 days."
+        data_tests:
+          - not_null
+      - name: dispute_count_all
+        description: "Disputes on Mastercard charges created in the last 30 days, including RDR."
+        data_tests:
+          - not_null
+      - name: dispute_count_non_rdr
+        description: "Same as dispute_count_all, excluding disputes resolved through RDR."
+        data_tests:
+          - not_null
+      - name: refund_count
+        description: "Refunds on captured Mastercard charges, created in the last 30 days."
+        data_tests:
+          - not_null
+      - name: dispute_rate_pct
+        description: "100 * dispute_count_all / sales_count."
+      - name: refund_rate_pct
+        description: "100 * refund_count / sales_count."
+
+  - name: stripe_dispute_analysis
+    description: >
+      Stripe disputes created since 2026-04-01, aggregated by dispute date, capture
+      week, status, card network (visa / mastercard / others), RDR flag, network
+      reason code, account, product and dispute amount. Used for dispute structure
+      analysis.
+    columns:
+      - name: dispute_date
+        description: "Date the dispute was created."
+        data_tests:
+          - not_null
+      - name: captured_week
+        description: "Week (Sunday start) of the dispute's balance transaction capture date."
+      - name: dispute_month
+        description: "First day of the month the dispute was created."
+      - name: status
+        description: "Current dispute status."
+      - name: card_brand
+        description: "Card network: visa, mastercard, or others."
+      - name: rdr
+        description: "True if the dispute was resolved through Visa Rapid Dispute Resolution."
+      - name: network_reason_code
+        description: "Card network dispute reason code."
+      - name: account_name
+        description: "Stripe account name."
+      - name: Product
+        description: "Product associated with the Stripe account."
+      - name: amount_usd
+        description: "Disputed amount in USD (converted from cents)."
+      - name: dispute_count
+        description: "Number of disputes in the group."
+        data_tests:
+          - not_null
+  - name: stripe_subscribers
+    description: >
+      Stripe subscriber reporting per product, at day/week/month/quarter/year grain: paid, free
+      and all subscribers (end of period), subscriber movements (new, reactivated, churned;
+      summed over the period), ARPA, ASP, LTV and ACL. The 'All Products' row is computed
+      independently at subscriber level, so it is NOT the sum of the product rows. Customers
+      with no identity mapping are kept under a stripe:<account_id>:<customer_id> key. Free
+      (active zero-price, non-paid) and all_subscribers include history reconstructed from
+      retained Stripe subscription events; outside the window covered by every active account,
+      free is null and all_subscribers is paid-only (see free_all_state_available). Recent
+      movements are provisional (a paid run only ends after a 15-day gap). Rebuilt in full on
+      every dbt_dag run. Grain: product_name x period_grain x period_start.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product_name
+              - period_grain
+              - period_start
+    columns:
+      - name: source_system
+        description: "Always 'stripe'."
+      - name: product_name
+        description: "Product from dim_product_payment_map (falls back to the Stripe account id), or 'All Products'."
+        data_tests:
+          - not_null
+      - name: period_grain
+        description: "day, week (Monday start), month, quarter or year."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['day', 'week', 'month', 'quarter', 'year']
+      - name: period_start
+        description: "First calendar day of the period."
+        data_tests:
+          - not_null
+      - name: period_data_start
+        description: "First day in the period with data."
+      - name: period_end
+        description: "Last day in the period with data; stock metrics are taken on this day."
+      - name: paid_subscribers
+        description: "Subscribers with positive MRR at period end."
+      - name: free_subscribers
+        description: "Active zero-price subscribers who are not paid at period end. Null outside complete event-history coverage."
+      - name: all_subscribers
+        description: "Paid + free + past-due free-only. Paid-only outside event-history coverage."
+      - name: new_subscribers
+        description: "First-ever paid runs starting in the period."
+      - name: reactivated_subscribers
+        description: "Paid runs starting in the period after a gap of more than 15 days."
+      - name: churned_subscribers
+        description: "Paid runs ending in the period (day after the last paid day)."
+      - name: net_change
+        description: "new + reactivated - churned."
+      - name: total_mrr_usd
+        description: "MRR in USD at period end."
+      - name: arpa_usd
+        description: "total_mrr_usd / paid_subscribers at period end."
+      - name: new_business_mrr_usd
+        description: "New-business MRR of first-time paid subscribers in the period (falls back to first-paid-day MRR)."
+      - name: asp_usd
+        description: "new_business_mrr_usd / new customers. Null when there are none or any has missing MRR."
+      - name: customer_churn_rate_6m_avg
+        description: "Average monthly churn over the six months before the period's month. Null with fewer than six months."
+      - name: ltv_usd
+        description: "arpa_usd / customer_churn_rate_6m_avg."
+      - name: paid_subscriber_churn_rate_6m_avg
+        description: "Same six-month churn average, used for ACL."
+      - name: acl_months
+        description: "1 / paid_subscriber_churn_rate_6m_avg. Month grain only."
+      - name: paid_without_mrr_today
+        description: "QA: paid subscribers minus subscribers observed with MRR on the day."
+      - name: missing_fx_rows
+        description: "QA: MRR rows with no USD conversion."
+      - name: asp_missing_mrr_users
+        description: "QA: new subscribers with no usable new-business MRR."
+      - name: unresolved_price_subscriptions
+        description: "QA: current active/past-due subscriptions whose price could not be resolved. Populated only on the latest day."
+      - name: free_is_proxy
+        description: "Always false; free is reconstructed from subscription event history."
+      - name: product_name_is_fallback
+        description: "True when product_name is the Stripe account id because no product mapping exists."
+      - name: free_all_state_available
+        description: "True when the period end falls inside complete reconstructed free/all history coverage."

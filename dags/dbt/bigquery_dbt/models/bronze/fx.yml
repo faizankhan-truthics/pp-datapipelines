@@ -1,0 +1,25 @@
+version: 2
+
+sources:
+  - name: bronze_fx
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    config:
+      tags: [ "exchange_date", "bronze"]
+
+    tables:
+      - name: daily_fx
+        description: "Table with daily currency conversion rates to USD. Table created from exchange rates Dag running daily to get data from a Google sheet. Sheet fed from GOOGLEFINANCE."
+        # No _elt_update_timestamp on this table (see include/config/exchange_rates.py's
+        # BQ_SCHEMA) -- the business `date` column is the only time signal, and it's the
+        # (close to) current date on every daily run.
+        config:
+          loaded_at_field: date
+          freshness:
+            warn_after: {count: 30, period: hour}
+            error_after: {count: 48, period: hour}
+      - name: history_fx
+        description: "Table with HISTORICAL currency conversion rates to USD. Table created from a history seed file. Seed created from GOOGLEFINANCE."
+        # One-time historical seed, never reloaded on a schedule -- no freshness check applies.
+        config:
+          freshness: null

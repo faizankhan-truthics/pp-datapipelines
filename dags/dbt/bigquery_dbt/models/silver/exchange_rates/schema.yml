@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: int_currency_conversion
+    description: >
+      Daily currency exchange rates enriched from historical and daily FX data.
+      Missing exchange rates are forward-filled using the most recent available
+      rate for each currency.
+
+    config:
+      contract:
+        enforced: false
+
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - exchange_date
+              - currency
+
+    columns:
+      - name: exchange_date
+        description: >
+          Date for which the exchange rate applies.
+        tests:
+          - not_null
+
+      - name: currency
+        description: >
+          Three-letter currency code for the exchange rate.
+        tests:
+          - not_null
+
+      - name: rate
+        description: >
+          Exchange rate for the currency on the given date. Missing rates are
+          forward-filled using the most recent available rate.  some currencies are missing early days eg GEL in 2019
+#        tests:
+#          - not_null
+
+      - name: source
+        description: >
+          Source of the exchange rate. History represents historical FX data,
+          daily represents newly ingested daily FX data, and fill represents
+          a rate carried forward from a previous date.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - history
+                  - daily
+                  - fill

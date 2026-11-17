@@ -1,0 +1,128 @@
+version: 2
+
+models:
+  - name: mastercard_refund_requests
+    description: >
+      Ticket-grain fact: support-ticket refund requests paid via Mastercard, matched
+      to their Solidgate/Stripe order or charge, with refund outcome. Grain:
+      ticket_id x source_system x order/charge. Country is NOT a consistent concept
+      across source_system — see column description.
+
+    columns:
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - solidgate
+                  - stripe
+
+      - name: account_id
+        description: Processing account — Solidgate merchant id (MID) or Stripe account id.
+
+      - name: account_name
+        description: Human-readable account/product name (Solidgate `_elt_account_name`, or the Stripe account's name from the stripe_accounts lookup).
+
+      - name: product
+        description: >
+          Product name. Solidgate: `product_name` from the order. Stripe: product name
+          from int_stripe_products, falling back to the raw product id if the product
+          hasn't synced yet, or `unknown` if no product could be resolved via the
+          invoice line item.
+
+      - name: country
+        description: >
+          Solidgate: IP-derived (geo_country on the order). Stripe: billing/shipping
+          address if present (rare in current data), else card-issuing country
+          (payment_method_details.card.country). These are different concepts —
+          do not compare country splits across source_system without calling this out.
+
+      - name: ticket_id
+        description: Zendesk ticket id of the refund request.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: source('bronze_zendesk', 'zendesk_tickets')
+                field: id
+
+      - name: email
+        description: Ticket requester's email, lower-cased.
+
+      - name: refund_issued
+        description: >
+          Whether a refund was actually issued for this order/charge. Solidgate:
+          any transaction on the order with operation=refund and status=success.
+          Stripe: any refund on the charge with status=succeeded. Note this is
+          determined at the order/charge level, not strictly time-correlated to
+          the ticket's creation date — a refund from an unrelated earlier request
+          on the same order/charge would also count.
+        tests:
+          - not_null
+
+  - name: mastercard_refund_summary_by_product_account
+    description: >
+      Mastercard refund-request volume and approval rate by product and processing
+      account (Stripe account id / Solidgate MID). Built from mastercard_refund_requests.
+
+    columns:
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        tests:
+          - not_null
+
+      - name: account_id
+        description: Processing account — Solidgate merchant id (MID) or Stripe account id.
+
+      - name: account_name
+        description: Human-readable account/product name.
+
+      - name: product
+        description: Product name (see mastercard_refund_requests.product for resolution logic).
+
+      - name: mastercard_refund_request_users
+        description: Distinct ticket count for this product/account — i.e. distinct users who filed a Mastercard-paid refund request.
+        tests:
+          - not_null
+
+      - name: approved_refund_users
+        description: Of those, how many had a refund actually issued.
+        tests:
+          - not_null
+
+      - name: approval_rate
+        description: approved_refund_users / mastercard_refund_request_users. Null if mastercard_refund_request_users is 0.
+
+  - name: mastercard_refund_summary_by_country
+    description: >
+      Mastercard refund-request volume, approval rate, and share of users by
+      country, within each source_system. Built from mastercard_refund_requests.
+      Country is not a consistent concept across source_system — see that
+      model's column description before comparing solidgate vs. stripe rows.
+
+    columns:
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        tests:
+          - not_null
+
+      - name: country
+        description: Country (see mastercard_refund_requests.country for resolution logic per source_system).
+
+      - name: users
+        description: Distinct ticket count for this country.
+        tests:
+          - not_null
+
+      - name: approved_refund_users
+        description: Of those, how many had a refund actually issued.
+        tests:
+          - not_null
+
+      - name: approval_rate
+        description: approved_refund_users / users. Null if users is 0.
+
+      - name: share_of_users_in_source
+        description: This country's share of mastercard_refund_request_users within its own source_system (solidgate shares sum to 1; stripe shares sum to 1, separately).

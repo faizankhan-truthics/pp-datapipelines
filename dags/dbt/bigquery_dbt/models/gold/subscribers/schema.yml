@@ -1,0 +1,56 @@
+version: 2
+
+models:
+
+  - name: combined_subscribers
+    description: >
+      Subscribers dashboard dataset. 'combined' rows merge Stripe and Solidgate at subscriber
+      level (identity user_key; unmapped Stripe customers keep a stripe:<account_id>:<customer_id>
+      key, unmapped Solidgate customers are dropped), with Paid winning over Free across
+      providers. 'stripe' and 'solidgate' rows are copied from stripe_subscribers and
+      solidgate_subscribers. Combined rows stop at the latest complete common provider date.
+      The 'All Products' row is computed independently at subscriber level, so it is NOT the
+      sum of the product rows. Recent movements are provisional (a paid run only ends after a
+      15-day gap). Rebuilt in full on every dbt_dag run.
+      Grain: source_system x product_name x period_grain x period_start.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source_system
+              - product_name
+              - period_grain
+              - period_start
+    columns:
+      - name: source_system
+        description: "combined, stripe or solidgate."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['combined', 'stripe', 'solidgate']
+      - name: product_name
+        description: "Product from dim_product_payment_map (falls back to the provider account), or 'All Products'."
+        data_tests:
+          - not_null
+      - name: period_grain
+        description: "day, week (Monday start), month, quarter or year."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['day', 'week', 'month', 'quarter', 'year']
+      - name: period_start
+        description: "First calendar day of the period."
+        data_tests:
+          - not_null
+      - name: period_end
+        description: "Last day in the period with data; stock metrics are taken on this day."
+      - name: free_subscribers
+        description: "Combined: free (explicit-free Stripe active or Solidgate active non-trial) and not paid in either provider at period end."
+      - name: all_subscribers
+        description: "Combined: paid + free + Stripe past-due free-only at period end."
+      - name: free_is_proxy
+        description: "Always true for combined rows."
+      - name: free_all_state_available
+        description: "Combined: true when the period end falls inside Stripe event-history and Solidgate free-state coverage."

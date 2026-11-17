@@ -1,0 +1,796 @@
+version: 2
+
+models:
+
+  - name: solidgate_subscription_history
+    description: >
+      Historical Solidgate subscription lifecycle for the Subscribers dashboard (Free
+      and All Subscribers): one row per subscription version, with the period it was
+      valid for. State/version level only — not pre-aggregated. Reconciles with the
+      validated sandbox table data-499514.gold_sandbox.tmp_solidgate_subscription_history.
+      To get a subscription's state as of any date, filter valid_from <= date and
+      (valid_to is null or valid_to > date).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account_name
+              - subscription_id
+              - updated_at
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: valid_from
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: captured_at
+          config:
+            severity: warn
+    columns:
+      - name: account_name
+        description: "Solidgate account name — the product dimension."
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: customer_id
+        description: "Solidgate customer account id."
+      - name: customer_email
+        description: "Customer's email as of this version."
+      - name: status
+        description: "`active` is live, `redemption` means a payment failed and is being retried, `cancelled` and `expired` are over."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['active', 'redemption', 'cancelled', 'expired', 'pending']
+      - name: trial
+        description: "Whether this version was on a trial."
+      - name: created_at
+        description: "When the subscription was created."
+      - name: updated_at
+        description: "When this version of the subscription was written. The version key, and the start of its validity period."
+        data_tests:
+          - not_null
+      - name: started_at
+        description: "When the subscription began."
+      - name: expired_at
+        description: "When the paid period ends."
+      - name: cancelled_at
+        description: "When it was cancelled, if it was."
+      - name: payment_type
+        description: "How the subscription is paid."
+      - name: product_id
+        description: "Solidgate product id."
+      - name: product_name
+        description: "Solidgate product name."
+      - name: product_amount
+        description: "Subscription product amount, in the subscription's own currency, as of this version."
+      - name: product_currency
+        description: "Currency of product_amount."
+      - name: captured_at
+        description: "When this raw snapshot was ingested — the source snapshot timestamp. Used only to break ties between duplicate versions, not a business timestamp."
+      - name: valid_from
+        description: "Start of this version's validity period. Equal to updated_at."
+        data_tests:
+          - not_null
+      - name: valid_to
+        description: "End of this version's validity period — the next version's updated_at for the same subscription. Null on the current version."
+
+  - name: solidgate_daily_vamp
+    description: >
+      Calculates daily Visa VAMP ratios using Solidgate card orders,
+      chargebacks, fraud alerts, and subscription attributes.
+
+    data_tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: month_
+          config:
+            severity: warn
+
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: month_
+          config:
+            severity: warn
+
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account
+              - month_
+              - order_description
+              - psp_name
+
+    columns:
+
+      - name: account
+        description: Solidgate account name.
+        tests:
+          - not_null
+
+      - name: psp_name
+        description: Payment service provider name — an additional grouping dimension alongside account and order_description.
+
+      - name: month_
+        description: Month of the VAMP calculation.
+        tests:
+          - not_null
+
+      - name: orders
+        description: Number of settled Visa orders included in the VAMP calculation.
+        tests:
+          - not_null
+
+      - name: order_amount_usd
+        description: Total settled Visa order amount in USD.
+        tests:
+          - not_null
+
+      - name: chargebacks
+        description: Number of Visa chargebacks included in the VAMP calculation.
+        tests:
+          - not_null
+
+      - name: chargeback_amount_usd
+        description: Total Visa chargeback amount in USD.
+        tests:
+          - not_null
+
+      - name: fraud_alerts
+        description: Number of Visa fraud alerts (TC40) included in the VAMP calculation.
+        tests:
+          - not_null
+
+      - name: fraud_amount_usd
+        description: Total Visa fraud alert amount in USD.
+        tests:
+          - not_null
+
+      - name: vamp_ratio
+        description: Visa chargebacks and fraud alerts divided by settled Visa orders.
+        tests:
+          - not_null
+          - elementary.column_anomalies:
+              arguments:
+                timestamp_column: month_
+              column_anomalies:
+                - null_count
+                - average
+              config:
+                severity: warn
+
+  - name: solidgate_monthly_vamp
+    description: >
+      Calculates monthly Visa VAMP ratios using settled Visa orders,
+      Visa chargebacks, and Visa fraud alerts by Solidgate account.
+
+    data_tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: month_
+          config:
+            severity: warn
+
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: month_
+          config:
+            severity: warn
+
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account
+              - month_
+              - order_description
+              - psp_name
+
+    columns:
+
+      - name: account
+        description: Solidgate account name.
+        tests:
+          - not_null
+
+      - name: psp_name
+        description: Payment service provider name — an additional grouping dimension alongside account and order_description.
+
+      - name: month_
+        description: Calendar month used for the VAMP calculation.
+        tests:
+          - not_null
+
+      - name: orders
+        description: Number of settled Visa orders included in the monthly VAMP calculation.
+        tests:
+          - not_null
+
+      - name: order_amount_usd
+        description: Total settled Visa order amount in USD for the month.
+        tests:
+          - not_null
+
+      - name: chargebacks
+        description: Number of Visa chargebacks included in the monthly VAMP calculation.
+        tests:
+          - not_null
+
+      - name: chargeback_amount_usd
+        description: Total Visa chargeback amount in USD for the month.
+        tests:
+          - not_null
+
+      - name: fraud_alerts
+        description: Number of Visa fraud alerts (TC40) included in the monthly VAMP calculation.
+        tests:
+          - not_null
+
+      - name: fraud_amount_usd
+        description: Total Visa fraud alert amount in USD for the month.
+        tests:
+          - not_null
+
+      - name: vamp_ratio
+        description: >
+          Monthly Visa VAMP ratio calculated as Visa chargebacks plus
+          fraud alerts divided by settled Visa orders.
+        tests:
+          - not_null
+          - elementary.column_anomalies:
+              arguments:
+                timestamp_column: month_
+                column_anomalies:
+                  - null_count
+                  - average
+              config:
+                severity: warn
+
+  - name: solidgate_net_revenue_daily
+    description: >
+      Daily Solidgate revenue summary including gross revenue,
+      PSP fees, refunds, disputes, and net revenue in USD.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date
+              - account_name
+              - product_name
+
+    columns:
+      - name: date
+        description: Accounting date of the financial entries.
+
+      - name: account_name
+        description: Solidgate account name.
+        tests:
+          - not_null
+
+      - name: reporting_account
+        description: Normalized account used for reporting and dashboard filters.
+        tests:
+          - not_null
+
+      - name: reporting_product
+        description: Normalized business product name used for reporting.
+        tests:
+          - not_null
+
+      - name: product_name
+        description: Subscription or plan-level product name.
+        tests:
+          - not_null
+
+      - name: gross_revenue_usd
+        description: Gross revenue from SALE financial entries in USD.
+        tests:
+          - not_null
+
+      - name: psp_fees_usd
+        description: Total PSP and payment-processing fees in USD.
+        tests:
+          - not_null
+
+      - name: refunds_usd
+        description: Total refunds in USD.
+        tests:
+          - not_null
+
+      - name: disputes_usd
+        description: Net disputes and chargebacks in USD, including reversals.
+        tests:
+          - not_null
+
+      - name: net_revenue_usd
+        description: Gross revenue minus PSP fees, refunds, and disputes.
+        tests:
+          - not_null
+
+  - name: solidgate_mrr_by_channel_daily
+    description: >
+      Daily MRR split by where the customer originally came from. The channel belongs to the
+      customer, not the payment — they are attributed once from the payment GA4 saw, and every
+      day they keep paying counts towards that channel. Customers we could not place appear as
+      `unattributed`, so the channels always add up to total MRR. Products without a GA4
+      property are entirely unattributed by construction.
+      Grain: snapshot_date x _elt_account_name x source x medium x campaign.
+    columns:
+      - name: snapshot_date
+        description: "The day these figures apply to."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: source
+        description: "Where the customer came from. `unattributed` when nothing matched."
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic."
+      - name: campaign
+        description: "The campaign that brought them in."
+      - name: campaign_id
+        description: "Google Ads campaign id, for joining to campaign spend."
+      - name: customers
+        description: "Customers from that source still paying on this day."
+        data_tests:
+          - not_null
+      - name: mrr_usd
+        description: >
+          What they are worth per month, in US dollars. Summing across every row for a day,
+          including unattributed, gives the same total as solidgate_mrr_usd_daily.
+
+  - name: solidgate_mrr_usd_daily
+    description: >
+      Daily MRR in USD per Solidgate account (product). Local-currency MRR converted at
+      the rate as-of the snapshot date, falling back to the most recent rate held for
+      that currency. Grain: snapshot_date x _elt_account_name.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+    columns:
+      - name: snapshot_date
+        description: "Date the MRR value applies to."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Solidgate account — the product dimension."
+        data_tests:
+          - not_null
+      - name: mrr_usd
+        description: >
+          Total MRR converted to USD. Null when every currency active that day lacks an
+          exchange rate — see test_solidgate_mrr_usd_currency_coverage.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: active_subscriptions
+        description: "Distinct subscriptions contributing MRR, counted at subscription grain."
+        data_tests:
+          - not_null
+      - name: customers
+        description: "Distinct customers contributing MRR, counted at subscription grain."
+        data_tests:
+          - not_null
+      - name: currencies
+        description: "Number of currencies contributing on this date."
+      - name: mrr_change_usd
+        description: "Change vs the previous day for the same account."
+      - name: mrr_change_pct
+        description: "Percentage change vs the previous day."
+
+  - name: solidgate_mrr_waterfall_daily
+    description: >
+      Daily view of how recurring revenue is moving, per product. Shows new business,
+      expansion and contraction; the remaining movements are added as each one is built.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: snapshot_date
+          config:
+            severity: warn
+    columns:
+      - name: snapshot_date
+        description: "The day these figures apply to."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: new_business_customers
+        description: "Customers who paid us for the first time that day."
+        data_tests:
+          - not_null
+      - name: new_business_mrr_usd
+        description: "What those new customers are worth per month, in US dollars."
+      - name: reactivation_customers
+        description: "Customers who had stopped paying and started again that day."
+        data_tests:
+          - not_null
+      - name: reactivation_mrr_usd
+        description: "What they are worth now, in US dollars. Their whole value, not the difference."
+      - name: expansion_customers
+        description: "Existing customers who started paying more that day."
+        data_tests:
+          - not_null
+      - name: expansion_mrr_usd
+        description: "How much more they are paying, in US dollars. The increase, not their new total."
+      - name: contraction_customers
+        description: "Existing customers who started paying less, without stopping altogether."
+        data_tests:
+          - not_null
+      - name: contraction_mrr_usd
+        description: "How much less they are paying, in US dollars. Negative. The decrease, not their new total."
+      - name: churn_customers
+        description: >
+          Customers who stopped paying us altogether that day. Leaves out anyone still on
+          a payment retry, and anyone who came back soon after.
+      - name: active_customers
+        description: "Everyone paying us that day. Gives the new-customer figure some context."
+        data_tests:
+          - not_null
+      - name: active_mrr_usd
+        description: "Total monthly recurring revenue that day, in US dollars."
+      - name: customers_missing_fx
+        description: >
+          Customers we could not convert because their currency has no exchange rate. They
+          still count as customers, but their value is missing from the dollar totals.
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: solidgate_card_orders_transaction_history
+    description: >
+      Full historical view of Solidgate card-order transactions, one row per transaction
+      (an order can have multiple transaction attempts). Passthrough of
+      int_solidgate_card_orders_transactions.
+    columns:
+      - name: transaction_id
+        description: "Solidgate transaction id — unique per transaction attempt."
+        data_tests:
+          - not_null
+          - unique
+      - name: order_id
+        description: "The order this transaction belongs to. Not unique on its own — an order can have several transactions."
+        data_tests:
+          - not_null
+
+  - name: solidgate_chargebacks_transaction_history
+    description: >
+      Full historical view of Solidgate chargeback transactions, one row per chargeback.
+      Passthrough of int_solidgate_chargebacks_transactions.
+    columns:
+      - name: chargeback_id
+        description: "Solidgate chargeback id — unique per chargeback."
+        data_tests:
+          - not_null
+          - unique
+      - name: chargeback_order_id
+        description: "The order this chargeback was raised against."
+        data_tests:
+          - not_null
+
+  - name: solidgate_refund_rate
+    description: >
+      Monthly refund-rate rollup of Solidgate card orders. Settled volume is attributed to the
+      month of the order's settlement_date and refunded volume to the month of its refund_date:
+      refund rate = volume refunded in Month X / volume settled in Month X. When rolling up
+      across dimensions, sum refunded_amount and settled_amount and divide; do not average the
+      rate columns. Grain: activity_month x psp_name x mid_connector x acquiring_bank x
+      descriptor x _elt_account_name x region x geo_country.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - activity_month
+              - psp_name
+              - mid_connector
+              - acquiring_bank
+              - descriptor
+              - _elt_account_name
+              - region
+              - geo_country
+    columns:
+      - name: activity_month
+        description: "Settlement month for settled metrics; refund month for refunded metrics."
+        data_tests:
+          - not_null
+      - name: psp_name
+        description: "Payment service provider name."
+      - name: mid_connector
+        description: "Solidgate merchant id (mid) used to process the order."
+      - name: acquiring_bank
+        description: "Acquiring bank associated with the order's mid."
+      - name: descriptor
+        description: "Statement descriptor shown to the customer for the order."
+      - name: _elt_account_name
+        description: "Solidgate account name."
+      - name: region
+        description: >
+          Geographic classification derived from geo_country. USA is classified as US,
+          Latin American countries are classified as LATAM, and all other countries are
+          classified as Other.
+      - name: geo_country
+        description: "Three-letter ISO country code associated with the order."
+      - name: settled_count
+        description: "Number of orders settled in activity_month (includes orders later refunded)."
+      - name: refunded_count
+        description: "Number of orders refunded in activity_month."
+      - name: refund_rate_count
+        description: "Refunded order count divided by settled order count for the month, as a percentage."
+      - name: settled_amount
+        description: "Total USD amount of orders settled in activity_month."
+      - name: refunded_amount
+        description: "Total USD amount of orders refunded in activity_month."
+      - name: refund_rate_amount
+        description: "Refunded amount divided by settled amount for the month, as a percentage."
+      - name: _elt_update_timestamp
+        description: "Timestamp of the latest source record update."
+        data_tests:
+          - not_null
+      - name: unique_key
+        description: "Concatenation of the grouping dimensions — the model's own merge/dedup key."
+        data_tests:
+          - not_null
+          - unique
+
+  - name: solidgate_acceptance_decline_weekly
+    description: >
+      Weekly card order acceptance and decline counts from int_solidgate_card_orders,
+      by account, PSP, card network, country, region, platform, amount band and decline
+      reason. Feeds the Acceptance Rate and Decline dashboards. Acceptance rate is
+      sum(succeeded) / sum(attempts) over any slice.
+
+    data_tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: week_start
+          config:
+            severity: warn
+
+    columns:
+
+      - name: week_start
+        description: Monday of the week the order was created.
+        tests:
+          - not_null
+
+      - name: account_name
+        description: Solidgate account name.
+
+      - name: psp_name
+        description: Payment service provider name.
+
+      - name: network
+        description: Card brand (Visa, Mastercard, ...).
+
+      - name: country
+        description: Customer geo country.
+
+      - name: region
+        description: Region derived from geo country.
+
+      - name: platform
+        description: Platform the order came from.
+
+      - name: amount_band
+        description: Order amount band in USD (under $1.50 or $1.50 and over).
+
+      - name: payment_type
+        description: Solidgate payment type of the order, as sent (for example recurring). Null when not set.
+
+      - name: payment_kind
+        description: >
+          Payment type for dashboard filters. Orders under $1.50 with no payment type are
+          'first payment', recurring orders under $1.50 are 'second payment'; all other
+          orders keep their payment type, or '(empty)' when it is not set.
+        tests:
+          - not_null
+
+      - name: decline_code
+        description: Solidgate error code. Null on accepted rows.
+
+      - name: decline_name
+        description: Error message for the decline code. Null on accepted rows.
+
+      - name: decline_action
+        description: Suggested next step for the decline code. Null on accepted rows.
+
+      - name: attempts
+        description: Number of card orders (succeeded + declines).
+        tests:
+          - not_null
+
+      - name: succeeded
+        description: Orders with status auth_ok, settle_ok, void_ok or refunded.
+        tests:
+          - not_null
+
+      - name: declines
+        description: All other orders, including those with a null status.
+        tests:
+          - not_null
+
+      - name: succeeded_amount_usd
+        description: USD amount of accepted orders, in dollars.
+
+      - name: declined_amount_usd
+        description: USD amount of declined orders, in dollars.
+
+  - name: solidgate_smmp_acceptance_rate
+    description: >
+      Mastercard SMMP acceptance-rate monitor. For each account, PSP and MID, the rolling
+      72h auth rate (current day plus the two before) against the prior 72h window, over
+      the last 10 days. Only rows with at least 25 attempts in the current window are kept.
+      flag is RED when the auth rate dropped 50+ points from a prior window that also had
+      25+ attempts, or when the current auth rate is below 30%.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account_name
+              - psp_name
+              - mid
+              - date
+
+    columns:
+
+      - name: account_name
+        description: Solidgate account name.
+        tests:
+          - not_null
+
+      - name: psp_name
+        description: Payment service provider name.
+
+      - name: mid
+        description: Solidgate merchant id.
+
+      - name: date
+        description: Last day of the current 72h window.
+        tests:
+          - not_null
+
+      - name: window_from
+        description: First day of the current 72h window.
+
+      - name: window_to
+        description: Last day of the current 72h window (same as date).
+
+      - name: total_cnt_72h
+        description: Mastercard card orders in the current 72h window.
+
+      - name: auth_rate_pct
+        description: Share of orders in the current window with status auth_ok, settle_ok, void_ok or refunded, as a percentage.
+
+      - name: prev_window_from
+        description: First day of the prior 72h window.
+
+      - name: prev_window_to
+        description: Last day of the prior 72h window.
+
+      - name: total_cnt_prev_72h
+        description: Mastercard card orders in the prior 72h window.
+
+      - name: auth_rate_prev_72h_pct
+        description: Auth rate in the prior 72h window, as a percentage. Null when the prior window had no orders.
+
+      - name: drop_points
+        description: Prior auth rate minus current auth rate, in percentage points. Positive means the rate fell.
+
+      - name: flag
+        description: RED when the MID breaches the drop or floor threshold, empty string otherwise.
+        tests:
+          - accepted_values:
+              arguments:
+                values: ['RED', '']
+
+  - name: solidgate_subscribers
+    description: >
+      Solidgate subscriber reporting per product, at day/week/month/quarter/year grain:
+      paid, free and all subscribers (end of period), subscriber movements (new, reactivated,
+      churned; summed over the period), ARPA, ASP, LTV and ACL. The 'All Products' row is
+      computed independently with global user dedup, so it is NOT the sum of the product rows.
+      Free is a proxy and is only known through the last captured subscription-history date;
+      after that it is null and all_subscribers is paid-only. Recent movements are provisional
+      (a paid run only ends after a 15-day gap). Rebuilt in full on every dbt_dag run.
+      Grain: product_name x period_grain x period_start.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product_name
+              - period_grain
+              - period_start
+    columns:
+      - name: source_system
+        description: "Always 'solidgate'."
+      - name: product_name
+        description: "Product from dim_product_payment_map (falls back to the Solidgate account name), or 'All Products'."
+        data_tests:
+          - not_null
+      - name: period_grain
+        description: "day, week (Monday start), month, quarter or year."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['day', 'week', 'month', 'quarter', 'year']
+      - name: period_start
+        description: "First calendar day of the period."
+        data_tests:
+          - not_null
+      - name: period_data_start
+        description: "First day in the period with data (later than period_start for the first period)."
+      - name: period_end
+        description: "Last day in the period with data; the end-of-period stock metrics are taken on this day."
+      - name: paid_subscribers
+        description: "Users with positive MRR at period end."
+      - name: free_subscribers
+        description: "Active non-trial subscribers with no paid MRR at period end. Null after the last captured history date."
+      - name: all_subscribers
+        description: "paid + free. Paid-only once free coverage ends."
+      - name: new_subscribers
+        description: "First-ever paid runs starting in the period."
+      - name: reactivated_subscribers
+        description: "Paid runs starting in the period after a gap of more than 15 days."
+      - name: churned_subscribers
+        description: "Paid runs ending in the period (day after the last paid day)."
+      - name: net_change
+        description: "new + reactivated - churned."
+      - name: total_mrr_usd
+        description: "MRR in USD at period end."
+      - name: arpa_usd
+        description: "total_mrr_usd / paid_subscribers at period end."
+      - name: new_business_mrr_usd
+        description: "New-business MRR of first-time paid users in the period."
+      - name: asp_usd
+        description: "new_business_mrr_usd / new customers. Null when there are none or any has missing MRR."
+      - name: customer_churn_rate_6m_avg
+        description: "Average monthly churn over the six months before the period's month. Null with fewer than six months."
+      - name: ltv_usd
+        description: "arpa_usd / customer_churn_rate_6m_avg."
+      - name: paid_subscriber_churn_rate_6m_avg
+        description: "Same six-month churn average, used for ACL."
+      - name: acl_months
+        description: "1 / paid_subscriber_churn_rate_6m_avg. Month grain only."
+      - name: paid_without_mrr_today
+        description: "QA: paid subscribers minus users observed with MRR on the day."
+      - name: missing_fx_rows
+        description: "QA: MRR rows with no USD conversion."
+      - name: asp_missing_mrr_users
+        description: "QA: new users with missing new-business MRR."
+      - name: free_is_proxy
+        description: "Always true; free subscribers are derived from subscription state history."
+      - name: product_name_is_fallback
+        description: "True when product_name is the Solidgate account name because no product mapping exists."

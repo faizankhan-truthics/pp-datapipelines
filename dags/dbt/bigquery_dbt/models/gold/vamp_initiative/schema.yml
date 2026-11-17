@@ -1,0 +1,170 @@
+version: 2
+
+models:
+
+  - name: vamp_initiative_126_days
+    description: >
+      Base table for the VAMP initiative dashboards. One row per subscription
+      x invoice x order (payment attempt), scoped to PS_PROD_INFOCHECKER's
+      "Pro Access — CE3" subscriptions. The rolling 126-day window is
+      currently commented out in the model (matching the original
+      un-windowed query). Feeds vamp_initiative_acceptance_rate,
+      vamp_initiative_recovery_rate, and vamp_initiative_efw.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - invoice_id
+              - order_id
+
+    columns:
+      - name: subscription_id
+        description: Solidgate subscription id.
+        tests:
+          - not_null
+
+      - name: invoice_id
+        description: Solidgate invoice id (unique within a subscription).
+        tests:
+          - not_null
+
+      - name: order_id
+        description: Solidgate order id — one payment attempt on an invoice.
+        tests:
+          - not_null
+
+      - name: invoice_number
+        description: 1-indexed sequence of the subscription's real (>$2) invoices, oldest first.
+        tests:
+          - not_null
+
+      - name: retry_attempt
+        description: Retry attempt number of this order within its invoice.
+
+      - name: status
+        description: Solidgate order status for this attempt.
+
+      - name: invoice_outcome
+        description: Status of the invoice's last (highest-numbered) retry attempt.
+
+      - name: order_amount_usd
+        description: Order amount in USD (major units).
+
+      - name: order_currency
+        description: Currency the order was charged in.
+
+      - name: efw_date
+        description: Date of a matching Stripe early fraud warning on this order's payment_intent, if any.
+
+      - name: dispute_date
+        description: Date of a matching non-RDR Stripe dispute on this order's payment_intent, if any.
+
+  - name: vamp_initiative_acceptance_rate
+    description: >
+      Acceptance rate by retry attempt and invoice sequence number, built from
+      vamp_initiative_126_days.
+
+    columns:
+      - name: retry_attempt
+        description: Retry attempt number.
+
+      - name: invoice_number
+        description: 1-indexed sequence of the subscription's real invoices, oldest first.
+
+      - name: attempts_made
+        description: Number of payment attempts at this retry_attempt/invoice_number.
+        tests:
+          - not_null
+
+      - name: accepted
+        description: Of those, how many reached an accepted status (auth_ok, settle_ok, refunded, void_ok).
+        tests:
+          - not_null
+
+      - name: acceptance_rate_pct
+        description: accepted / attempts_made, as a percentage.
+
+  - name: vamp_initiative_recovery_rate
+    description: >
+      Recovery rate per invoice sequence number: how much of the max amount
+      attempted was ultimately recovered via an accepted attempt. Built from
+      vamp_initiative_126_days.
+
+    columns:
+      - name: invoice_number
+        description: 1-indexed sequence of the subscription's real invoices, oldest first.
+
+      - name: invoices
+        description: Distinct invoice count at this invoice_number.
+        tests:
+          - not_null
+
+      - name: sum_max_amount_usd
+        description: Sum of the max amount attempted per invoice, in USD.
+
+      - name: sum_min_amount_usd
+        description: Sum of the min accepted amount per invoice, in USD.
+
+  - name: vamp_initiative_trials_voiding
+    description: >
+      Initiative #2: Cancel Auth at Trial Start. Monthly impact of voiding
+      trial-amount (<=$1.50) Stripe auths that were followed by the same
+      customer's first real (>$1.50) successful charge within 114 hours,
+      on account acct_1RoZfRALzAR0Hu3M. Estimates transactions/revenue
+      removed and disputes avoided (0.25% assumed propensity).
+
+    columns:
+      - name: month
+        description: Calendar month (from the trial auth's created_ts) that the row summarizes.
+        tests:
+          - not_null
+
+      - name: charges_voided
+        description: In-scope trial auths that were voided (not captured).
+
+      - name: customers_affected
+        description: Distinct customers with at least one voided trial auth.
+
+      - name: revenue_forgone_usd
+        description: Sum of the voided auths' amounts, in USD.
+
+      - name: voided_charges_of_disputers
+        description: Of the voided auths, how many belong to a customer who disputed a charge on this account.
+
+      - name: dispute_propensity_pct
+        description: Assumed probability that a disputer's voided auth would have gone on to be disputed (0.25%).
+
+      - name: est_disputes_avoided
+        description: voided_charges_of_disputers x dispute_propensity_pct.
+
+      - name: in_scope_but_captured
+        description: Control check — in-scope trial auths that were captured anyway (should stay near 0 once voiding is live).
+
+  - name: vamp_initiative_efw
+    description: >
+      Early fraud warning and non-RDR dispute rate by invoice sequence number,
+      at order grain. Built from vamp_initiative_126_days.
+
+    columns:
+      - name: invoice_number
+        description: 1-indexed sequence of the subscription's real invoices, oldest first.
+
+      - name: total_orders
+        description: Distinct orders (payment attempts) at this invoice_number.
+        tests:
+          - not_null
+
+      - name: efw_orders
+        description: Of those, how many have a matching Stripe early fraud warning.
+        tests:
+          - not_null
+
+      - name: efw_rate_pct
+        description: efw_orders / total_orders, as a percentage.
+
+      - name: dispute_orders_non_rdr
+        description: Distinct orders with a matching non-RDR Stripe dispute.
+        tests:
+          - not_null

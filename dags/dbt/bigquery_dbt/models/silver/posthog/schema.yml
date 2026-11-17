@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: int_posthog_events
+    description: "PostHog events without the export's duplicates: one row per (team_id, uuid)."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - team_id
+              - uuid
+    columns:
+      - name: uuid
+        description: "PostHog event id."
+        data_tests:
+          - not_null
+      - name: team_id
+        description: "PostHog project id."
+        data_tests:
+          - not_null
+      - name: product_name
+        description: "From seed_ga4_payment_account_map, joined on posthog_id."
+      - name: timestamp
+        description: "Event time (UTC)."
+      - name: bq_ingested_timestamp
+        description: "When the export loaded the row."
+      - name: _dbt_loaded_at
+        description: "When this model last wrote the row."

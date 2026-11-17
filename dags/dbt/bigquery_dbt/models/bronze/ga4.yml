@@ -1,0 +1,62 @@
+version: 2
+
+sources:
+  - name: ga4_infochecker
+    description: "GA4 export for the InfoChecker property (473709575). Pairs with PS_PROD_INFOCHECKER."
+    database: "{{ target.project }}"
+    schema: analytics_473709575
+    config:
+      tags: [ "ga4", "bronze" ]
+
+    tables:
+      - name: events
+        identifier: "events_*"
+        description: "Date-sharded event export."
+
+  - name: ga4_qga
+    description: "GA4 export for the QGA property (479933657). Pairs with QR_PROD_QGA_LIVE."
+    database: "{{ target.project }}"
+    schema: analytics_479933657
+    config:
+      tags: [ "ga4", "bronze" ]
+
+    tables:
+      - name: events
+        identifier: "events_*"
+        description: "Date-sharded event export."
+
+  - name: ga4_iq_center
+    description: "GA4 export for the IQ Center property (538823059). Pairs with QUIZ_PROD_IQCENTER_LIVE."
+    database: "{{ target.project }}"
+    schema: analytics_538823059
+    config:
+      tags: [ "ga4", "bronze" ]
+
+    tables:
+      - name: events
+        identifier: "events_*"
+        description: "Date-sharded event export."
+
+  - name: ga4_chatbox
+    description: "GA4 export for the Chatbox property (518695982). Pairs with CHATBOX_PROD."
+    database: "{{ target.project }}"
+    schema: analytics_518695982
+    config:
+      tags: [ "ga4", "bronze" ]
+
+    tables:
+      - name: events
+        identifier: "events_*"
+        description: "Date-sharded event export."
+
+  - name: ga4_docuhero
+    description: "GA4 export for the docuhero property (559806806). Dataset appears once the site sends its first events."
+    database: "{{ target.project }}"
+    schema: analytics_559806806
+    config:
+      tags: [ "ga4", "bronze" ]
+
+    tables:
+      - name: events
+        identifier: "events_*"
+        description: "Date-sharded event export."

@@ -1,0 +1,93 @@
+version: 2
+
+# GA4's native BigQuery Export
+# Only properties with is_stitchable = true in seeds/seed_ga4_payment_account_map.csv are listed here
+sources:
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_OQG1') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_OQG1') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+        description: "Raw GA4 event export, wildcard-sharded by day (rolling ~22-day intraday buffer)."
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_QCIO') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_QCIO') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_LOCATION_TOOL') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_LOCATION_TOOL') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_QR_GENERATOR_AI') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_QR_GENERATOR_AI') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_INFOCHECKER') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_INFOCHECKER') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_CHATBOX_AI') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_CHATBOX_AI') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_IQ_CENTER') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_IQ_CENTER') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_SIMPL_AI') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_SIMPL_AI') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_OPENGEN_AI') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_OPENGEN_AI') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_PUBLICREGISTRY') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_PUBLICREGISTRY') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"
+
+  - name: "analytics_{{ env_var('GA4_PROPERTY_ID_REVERSLY') }}"
+    database: "{{ target.project }}"
+    schema: "analytics_{{ env_var('GA4_PROPERTY_ID_REVERSLY') }}"
+    config:
+      tags: [ "ga4", "bronze" ]
+    tables:
+      - name: "events_intraday_*"

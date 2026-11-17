@@ -1,0 +1,39 @@
+version: 2
+
+sources:
+  - name: bronze_chatbox_db
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: >
+      Chatbox activation metrics, pulled from chatmessage/chatroom
+      (chatbox_rds_postgres, reached via Starburst) -- aggregated at the source,
+      not a raw table mirror. See include/config/chatbox_db_settings.py.
+    config:
+      tags: ["chatbox_db", "bronze"]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: chatbox_ai_response_activation
+        description: >
+          Each Chatbox user's first-ever successful AI response timestamp
+          (chatmessage.sentby='Bot' AND status='ready', joined to chatroom.userid).
+          Mostly insert-only, with a self-correcting update if an earlier
+          timestamp is ever found for an already-recorded user.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id]
+              config:
+                severity: warn
+        columns:
+          - name: account_id
+            description: "Chatbox userid (chatroom.userid)."
+            data_tests:
+              - not_null:
+                  config:
+                    severity: warn
+          - name: first_successful_ai_response_at
+            description: "Timestamp of this user's first chatmessage with sentby='Bot' AND status='ready'."

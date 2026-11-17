@@ -1,0 +1,257 @@
+version: 2
+
+models:
+  - name: int_ga4_funnel_sessions
+    description: >
+      Which raw "Funnel" value (the dashboard's Funnel filter, Ticket 4) a session entered
+      through, resolved once per session the same way int_ga4_sessions resolves source/medium/
+      campaign. Only covers projects with has_ga4_export = true in seed_ga4_payment_account_map (is_dashboard_project) (5 of
+      7 -- location_tool, infochecker, iq_center, publicregistry, reversly). tracelo and fitday
+      are excluded outright, not approximated: tracelo's GA4 connection only produces
+      aggregated report tables with no transaction_id/session id/event_params to read, and
+      fitday has no BigQuery Export dataset at all.
+
+      This model stops at the raw per-session funnel value (which quiz/lookup/landing-page the
+      session entered through). It does NOT yet roll that up into the dashboard's three-way
+      Search→Paywall / Quiz→Paywall / Trial→Subscription grouping -- that rollup needs to know
+      which commerce event actually converted (paid_trial vs free_trial/quit_trial_free), which
+      lives at the transaction grain, not the session grain. That's the next model to build,
+      joining this to int_ga4_payment_stitch / int_ga4_transactions.
+
+      Grain: ga4_property_name x user_pseudo_id x ga_session_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - ga4_property_name
+              - user_pseudo_id
+              - ga_session_id
+    columns:
+      - name: ga4_property_name
+        description: "Join key to dim_project / seed_ga4_payment_account_map."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_project')
+                field: ga4_property_name
+      - name: user_pseudo_id
+        data_tests:
+          - not_null
+      - name: ga_session_id
+        data_tests:
+          - not_null
+      - name: session_date
+        description: "The day the session started, property timezone. Same min(ga4_date)-over-the-read-window caveat as int_ga4_sessions.session_date."
+        data_tests:
+          - not_null
+      - name: funnel
+        description: >
+          The session's entry-path value, in each project's own vocabulary (not yet rolled up
+          to Search/Quiz/Trial -- see the model description). iq_center: iq/adhd/love/autism/
+          personality/eq. infochecker/reversly: phone-lookup/image-lookup/track/tracking.
+          location_tool: trace/track/tracking. publicregistry: property/court/vehicle/license/
+          search. Null when the session never fired an event carrying a usable signal.
+      - name: campaign_id
+        description: "Google Ads campaign id, same extraction as int_ga4_sessions.campaign_id. For joining to campaign-level spend/ROAS marts, not for funnel derivation."
+      - name: gclid
+        description: "Google Ads click id, same extraction as int_ga4_sessions.gclid."
+
+  - name: int_ga4_payment_stitch
+    description: >
+      One row per transaction, from either side, saying whether GA4 and the payment
+      processor both saw it. Matched on transaction_id within an account/source, with no date
+      in the join — Solidgate/Stripe are UTC and GA4 is property timezone, so a payment near
+      midnight would otherwise miss. Generalized across both payment sources: GA4 is joined
+      through seed_ga4_payment_account_map (payment_source x account_key), not
+      int_ga4_transactions._elt_account_name, since that column is null for Stripe-backed
+      properties by design. Carries campaign_id/gclid alongside subscription_id/invoice_id so
+      a downstream mart can attribute a subscription's transactions back to the campaign that
+      acquired it without re-deriving the join (see
+      gold/ga4/ga4_transaction_attribution.sql, the first consumer).
+      subscription_id/invoice_id are null for Stripe rows outside a subscription (most Stripe
+      transactions on these accounts are one-time purchases, not subscription billing) — see
+      int_stripe_transactions.sql for why.
+      Grain: payment_source x account_key x transaction_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - payment_source
+              - account_key
+              - transaction_id
+    columns:
+      - name: match_date
+        description: "Payment date where there is one, otherwise the GA4 date."
+        data_tests:
+          - not_null
+      - name: payment_source
+        description: "Which processor the payment side came from."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+      - name: account_key
+        description: "The Solidgate account or Stripe account id, i.e. which product, per payment_source."
+        data_tests:
+          - not_null
+      - name: transaction_id
+        description: "The id itself, from whichever side has it. Solidgate's order id / Stripe's PaymentIntent id is what GA4 records as its transaction id."
+        data_tests:
+          - not_null
+      - name: ga4_transaction_id
+        description: "The id as GA4 recorded it. Empty when GA4 never saw this transaction."
+      - name: pay_transaction_id
+        description: "The id as the payment processor recorded it. Empty when the processor has no record of it."
+      - name: match_status
+        description: >
+          `matched` when both systems have it, `payment_only` when GA4 never saw it —
+          usually a renewal/rebill, since nobody is on the site — and `ga4_only` when GA4
+          emitted an id the processor has no record of.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['matched', 'payment_only', 'ga4_only']
+      - name: pay_date
+        description: "When the payment was attempted, in UTC. Empty for ga4_only rows."
+      - name: subscription_id
+        description: "The subscription the payment belongs to. Null when this transaction isn't tied to a subscription at all (common on Stripe, rare on Solidgate)."
+      - name: invoice_id
+        description: "The invoice the payment belongs to. Same nullability as subscription_id."
+      - name: order_status
+        description: "Whether the payment went through. Solidgate only -- Stripe's revenue_usd is already resolved to a succeeded-only sum, so there's no separate attempt-level status to carry."
+      - name: revenue_usd
+        description: >
+          Solidgate: order_amount_usd, whatever order_status -- not zeroed out for
+          failed/declined attempts here, revenue recognition is a gold-layer decision. Stripe:
+          amount_usd, which int_stripe_transactions already resolves to a succeeded-only sum
+          -- these two are NOT on the same recognition basis, a gold consumer must branch on
+          payment_source before treating them as directly comparable/summable.
+      - name: ga4_date
+        description: "The day GA4 saw it, in the property timezone. Empty for payment_only rows."
+      - name: ga4_property_name
+        description: "Which GA4 property saw it."
+      - name: campaign_id
+        description: "Google Ads campaign id GA4 resolved for this transaction, from int_ga4_transactions. Empty for payment_only rows, and for matched rows where GA4 couldn't resolve a campaign."
+      - name: gclid
+        description: "Google Ads click id, from int_ga4_transactions. Only present when the purchase happened in the same session as the ad click."
+
+  - name: int_ga4_sessions
+    description: >
+      Where each GA4 session came from. The traffic source is recorded on the events that
+      open a session and is absent from everything after, so a purchase event carries the
+      transaction id and no source at all. This resolves the source once per session so
+      anything inside it can inherit it. Each field is taken independently, because the
+      campaign id and the source do not always arrive on the same event.
+      Merged on the session key rather than overwritten by partition: session_date is not
+      part of the grain, so a session whose date changed used to land in a second partition
+      that insert_overwrite never replaced.
+      Grain: ga4_property_name x user_pseudo_id x ga_session_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - ga4_property_name
+              - user_pseudo_id
+              - ga_session_id
+    columns:
+      - name: ga4_property_name
+        description: "Which GA4 property. Join key to seed_ga4_payment_account_map."
+        data_tests:
+          - not_null
+      - name: user_pseudo_id
+        description: "GA4's own visitor id. Resets when cookies are cleared or the device changes."
+        data_tests:
+          - not_null
+      - name: ga_session_id
+        description: "GA4 session id. Only unique within a visitor, not on its own."
+        data_tests:
+          - not_null
+      - name: session_date
+        description: >
+          The day the session started, in the property's timezone. Taken as min(ga4_date)
+          over the events in the read window, so it can move for a session spanning several
+          days; harmless because the model merges on the session key rather than the
+          partition, and nothing downstream joins on it.
+        data_tests:
+          - not_null
+      - name: source
+        description: "Where the visitor came from, e.g. bing. Taken from the traffic source, the event parameters or the page URL."
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic."
+      - name: campaign
+        description: "The campaign name, when one was tagged."
+      - name: campaign_id
+        description: "Google Ads campaign id, for joining to campaign spend."
+      - name: gclid
+        description: "Google Ads click id, when the session began with an ad click."
+
+  - name: int_ga4_transactions
+    description: >
+      Transaction ids as seen by GA4, across every property confirmed to emit one that matches
+      a real payment record (seeds/seed_ga4_payment_account_map.csv). Generalized version of
+      int_ga4_infochecker_transactions covering all mapped accounts/sources. Grain: ga4_date x
+      ga4_property_name x transaction_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - ga4_property_name
+              - ga4_date
+              - transaction_id
+    columns:
+      - name: ga4_property_name
+        description: "Lowercased GA4_PROPERTY_ID_<NAME> suffix. Join key to seed_ga4_payment_account_map."
+        data_tests:
+          - not_null
+      - name: ga4_property_id
+        description: "Numeric GA4 property id (the analytics_<id> BigQuery Export dataset)."
+        data_tests:
+          - not_null
+      - name: ga4_date
+        description: "GA4 event_date, parsed. Property timezone, not UTC."
+        data_tests:
+          - not_null
+      - name: transaction_id
+        description: "Join key to the payment side."
+        data_tests:
+          - not_null
+      - name: id_source
+        description: "Which GA4 field carried the id."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ecommerce', 'event_params', 'user_properties']
+      - name: source
+        description: >
+          Where the visitor came from, e.g. google. Taken from the purchase event when it
+          carries one, otherwise filled from the session the purchase happened in — GA4
+          records the source at the start of a session and not afterwards.
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic. Same fallback chain as source."
+      - name: campaign
+        description: "The campaign name, when one was tagged. Same fallback chain as source."
+      - name: source_scope
+        description: >
+          Whether the traffic source came from the purchase event itself or was filled from
+          the session. Mostly `session` is expected and normal; it is worth watching because
+          a shift means the site's tagging has changed.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['event', 'session']
+      - name: campaign_id
+        description: >
+          Google Ads campaign id, from the traffic source, the last-click session, the event
+          parameters or the page URL. Joins to Google Ads campaign spend.
+      - name: gclid
+        description: >
+          Google Ads click id. Only present when the purchase happened in the same session as
+          the ad click, so it is a floor on how much spend can be matched, not a ceiling on
+          how much came from ads.
+      - name: _elt_account_name
+        description: >
+          Solidgate account for this property, from seed_ga4_payment_account_map. Null for
+          Stripe-backed properties (they have no Solidgate account at all).

@@ -1,0 +1,82 @@
+version: 2
+
+models:
+  - name: gross_profit_daily
+    description: >
+      Daily gross profit per product, combining net revenue, ad spend, and
+      ChargebackHit costs. Gross profit = net revenue - ad spend - ChargebackHit
+      cost. Built on a full date x product spine, so every product that
+      appears in any of the three sources gets a row for every day in the
+      overall reporting window (min to max date across all sources) -- not
+      just days/products where all three sources report data. Metric columns
+      are NULL (not 0) when a source has no data available at all for that
+      product (see the `missing_*` flags below); they're 0 when the source
+      is available but simply has no activity for that date/product.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date
+              - product
+
+    columns:
+      - name: date
+        description: Reporting date.
+        tests:
+          - not_null
+
+      - name: product
+        description: Normalized product name, unified across revenue, ads, and ChargebackHit sources.
+        tests:
+          - not_null
+
+      - name: net_revenue_usd
+        description: >
+          Net revenue in USD for this product/date, from gold.net_revenue_daily.
+          NULL if this product has no revenue data at all (see missing_revenue);
+          0 if revenue is tracked but there was none on this date.
+
+      - name: ad_spend_usd
+        description: >
+          Ad spend in USD for this product/date, from gold.ga4_ads_reconciliation.
+          NULL if this product isn't in the ads-supported product list (see
+          missing_ad_spend); 0 if ads are tracked but there was no spend on this date.
+
+      - name: chargebackhit_cost_usd
+        description: >
+          Total ChargebackHit alert cost in USD for this product/date.
+          NULL if this product isn't in the ChargebackHit-supported product list
+          (see missing_chargebackhit); 0 if tracked but no alerts on this date.
+
+      - name: chargebackhit_alerts
+        description: >
+          Count of ChargebackHit alerts for this product/date. Same NULL-vs-0
+          rule as chargebackhit_cost_usd.
+
+      - name: gross_profit_usd
+        description: >
+          net_revenue_usd - ad_spend_usd - chargebackhit_cost_usd. Only populated
+          when all three sources are available for this product/date (see
+          gross_profit_complete); NULL otherwise, since a partial calculation
+          would be misleading.
+
+      - name: missing_revenue
+        description: True if this product has no revenue data available at all.
+        tests:
+          - not_null
+
+      - name: missing_ad_spend
+        description: True if this product isn't covered by ads reconciliation.
+        tests:
+          - not_null
+
+      - name: missing_chargebackhit
+        description: True if this product isn't covered by ChargebackHit alerts.
+        tests:
+          - not_null
+
+      - name: gross_profit_complete
+        description: True only when revenue, ad spend, and ChargebackHit data are all available for this product/date -- i.e. gross_profit_usd is trustworthy.
+        tests:
+          - not_null

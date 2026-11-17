@@ -1,0 +1,54 @@
+version: 2
+
+sources:
+  - name: bronze_anytrack
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: >
+      Raw AnyTrack event tables, one per product (see PRODUCTS in
+      include/config/anytrack_settings.py for the full list). Only the products
+      actually referenced by a dbt model are declared here -- add more as needed.
+    config:
+      tags: ["anytrack", "bronze"]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: anytrack_files_editor_events
+        description: "AnyTrack webhook events for the files_editor product -- every event type, not just transactional (see merge_events_all_events.sql)."
+      - name: anytrack_chatbox_ai_events
+        description: "AnyTrack webhook events for chatbox_ai (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_file_editor_events
+        description: "AnyTrack webhook events for file_editor (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_fitday_events
+        description: "AnyTrack webhook events for fitday (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_giftmusic_events
+        description: "AnyTrack webhook events for giftmusic (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_infochecker_events
+        description: "AnyTrack webhook events for infochecker (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_iqcenter_events
+        description: "AnyTrack webhook events for iqcenter (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_location_tool_events
+        description: "AnyTrack webhook events for location_tool (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_opengen_ai_events
+        description: "AnyTrack webhook events for opengen_ai (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_oqg_events
+        description: "AnyTrack webhook events for oqg (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_publicregistry_events
+        description: "AnyTrack webhook events for publicregistry (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_qci_events
+        description: "AnyTrack webhook events for qci (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_qga_events
+        description: "AnyTrack webhook events for qga (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_reversly_events
+        description: "AnyTrack webhook events for reversly (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_simpl_ai_events
+        description: "AnyTrack webhook events for simpl_ai (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_tracelo_events
+        description: "AnyTrack webhook events for tracelo (user journey mart: signups, purchases and first-touch main_attribution)."
+      - name: anytrack_files_editor_preprod_events
+        description: "AnyTrack webhook events for files_editor_preprod, plus rows the Conversion API backfill appended (_source = 'capi_backfill')."
+      - name: anytrack_docuhero_events
+        description: "AnyTrack webhook events for docuhero, plus rows the Conversion API backfill appended (_source = 'capi_backfill')."

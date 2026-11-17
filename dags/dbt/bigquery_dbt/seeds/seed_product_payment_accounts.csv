@@ -1,0 +1,46 @@
+product,source_system,account,note
+infochecker,solidgate,PS_PROD_INFOCHECKER,
+infochecker,stripe,acct_1RoZfRALzAR0Hu3M,
+publicregistry,solidgate,BGR_PROD_PUBLICREGISTRY_US,
+publicregistry,stripe,acct_1Tp7XDA90JBVcIeI,
+reversly,solidgate,REVERSELY_LIVE,
+reversly,stripe,acct_1U5mQoATU58Qu7Eg,
+fitday,stripe,acct_1TjbAoAcq7wjiSGg,
+iqcenter,solidgate,QUIZ_PROD_IQCENTER_LIVE,
+iqcenter,stripe,acct_1TbtvaAPsISuQDcS,
+opengen_ai,solidgate,OPN_PROD,
+opengen_ai,stripe,acct_1U3XuvAaaCSb5BaF,
+oqg,stripe,acct_1PgbrSJaoNXdYiB1,OQG_LLC; API version dahlia
+oqg,stripe,acct_1M08FxKXJvFOZ1iN,historic: last charge 2024-09
+qci,stripe,acct_1Pgc8ILQzI0D4HQZ,
+qga,solidgate,QR_PROD_QGA_LIVE,
+qga,stripe,acct_1RoZVxAcbdMGFenA,
+chatbox_ai,solidgate,CHATBOX_PROD,
+chatbox_ai,stripe,acct_1RoZt8AQlQPZ82bV,
+simpl_ai,solidgate,CHATBOT_PROD_SIMPL,
+simpl_ai,stripe,acct_1Tp6xLAmMx3bMuOu,
+location_tool,stripe,acct_1PctqCA3dWaWNtKw,
+location_tool,solidgate,PS_PROD_LOCATIONTOOL_LIVE,historic: 6 orders in 2025
+files_editor,solidgate,PDF_PROD_FILES_EDITOR,
+files_editor,stripe,acct_1RoZLNAdzmaSOcuv,FILES_EDITOR
+files_editor,stripe,acct_1SatF7AZ4wD2xkRF,FE_02
+files_editor,stripe,acct_1SatF8PMTqrWQdXl,FE_03
+files_editor,stripe,acct_1SaswwPKyAEmRW18,FE_04
+files_editor,stripe,acct_1SatFCPFe4KEQyBI,FE_05
+files_editor,stripe,acct_1SatFJAO84fmPDiZ,FE_06
+files_editor,stripe,acct_1SatFGPLbV19CdAc,FE_07
+files_editor,stripe,acct_1SatFGA3UGBlgRxe,FE_08
+files_editor,stripe,acct_1SatFGAKWR4iwd6Y,FE_09
+files_editor,stripe,acct_1SatF4AefGG2qpsv,FE_10
+files_editor,stripe,acct_1SatFAPDxIOynKng,FE_11
+files_editor,stripe,acct_1Tb3xgA8F4u6btW3,FE_12
+files_editor,stripe,acct_1Tb479Afm3oWOX25,FE_13
+files_editor,stripe,acct_1Tb4IcAVTnkJFtcP,FE_14
+files_editor,stripe,acct_1Tb4NvAGeMASZmc2,FE_15
+files_editor,stripe,acct_1Tb4RoADOsCzhHwi,FE_16
+tracelo,stripe,acct_1PidyMARglNY93qr,TRC; descriptor HELP-TRACELO.COM
+tracelo,stripe,acct_1NJ6tvLFvpGNSJY7,historic: last charge 2024-09
+tracelo,solidgate,PS_PROD_TRACELO_LIVE,historic: 15 orders in 2025
+giftmusic,solidgate,MSC_PROD,
+giftmusic,stripe,acct_1U80L6Asx4j23u68,
+docuhero,stripe,acct_1Tc16aAGjfcZh9or,

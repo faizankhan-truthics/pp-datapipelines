@@ -1,0 +1,29 @@
+[tool.semantic_release]
+branch = "main"
+tag_format = "v{version}"
+prerelease = false
+
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "feat",
+    "fix",
+    "perf",
+    "refactor",
+    "style",
+    "test"
+]
+
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "refactor"]
+[tool.ruff]
+target-version = "py312"
+extend-exclude = ["dags/dbt/bigquery_dbt/dbt_packages", ".astro", "terraform"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B"]
+# B008: Airflow DAG factories use pendulum.datetime(...) as argument defaults
+ignore = ["B008"]

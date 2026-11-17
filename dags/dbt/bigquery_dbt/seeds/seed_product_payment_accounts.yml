@@ -1,0 +1,36 @@
+version: 2
+
+seeds:
+  - name: seed_product_payment_accounts
+    description: >
+      The payment accounts of each user journey mart product (seed_product_registry), one row per
+      account: a product can bill through several Stripe accounts (Files Editor has 16) and
+      Solidgate accounts. Every journey model reads payments through this seed. Historic accounts
+      stay listed so their customers keep their journey.
+    config:
+      tags: ["journey", "seed", "on-full-refresh"]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['source_system', 'account']
+    columns:
+      - name: product
+        description: "Product key (seed_product_registry.product)."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_product_registry')
+                field: product
+      - name: source_system
+        description: "solidgate or stripe."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+      - name: account
+        description: "Solidgate _elt_account_name or Stripe _elt_stripe_account_id."
+        data_tests:
+          - not_null
+      - name: note
+        description: "Free text: account alias, why a historic account is kept."

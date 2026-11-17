@@ -1,0 +1,232 @@
+version: 2
+
+models:
+  - name: ga4_payment_match_campaign_daily
+    description: >
+      Campaign-level companion to ga4_payment_match_daily: attributes real Solidgate/Stripe
+      transaction revenue to the GA4 campaign_id that generated it. Feeds
+      gold/ga4_ads_recon/campaign_roas_daily.sql. INNER JOIN between GA4 and payment transactions
+      (unlike ga4_payment_match_daily's full outer join) -- only rows with both a real payment and
+      a matching GA4 transaction can be attributed to a campaign. Only the exact transaction GA4
+      observed is attributed; subscription renewals with no matching GA4 transaction are
+      intentionally excluded (no first-touch customer-level fallback here, unlike
+      solidgate_mrr_by_channel_daily), so this understates true campaign revenue for
+      subscription-heavy accounts. Grain: pay_date x payment_source x account_key x campaign_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - pay_date
+              - payment_source
+              - account_key
+              - campaign_id
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: pay_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: pay_date
+          config:
+            severity: warn
+    columns:
+      - name: pay_date
+        data_tests:
+          - not_null
+      - name: payment_source
+        description: "'solidgate' or 'stripe'."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+      - name: account_key
+        description: "Solidgate account name or Stripe account id. Join key to seed_ga4_payment_account_map.account_key."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_ga4_payment_account_map')
+                field: account_key
+      - name: campaign_id
+        description: "Google Ads campaign id GA4 resolved for this transaction. Null when GA4 saw the purchase but couldn't resolve a campaign (kept for revenue-completeness auditing, not just Ads-attributable revenue)."
+      - name: ga4_property_name
+      - name: gclid
+      - name: revenue_usd
+        description: "Sum of successful-payment revenue in USD. Solidgate: order_amount_usd zeroed out for non-successful order_status. Stripe: amount_usd already reflects only succeeded charges. Recognized gross, not net of refunds."
+      - name: txn_cnt
+        description: "Count of distinct matched transaction_ids in this group, successful or not (mirrors revenue_usd's row-preserving behavior, not a revenue count)."
+
+  - name: ga4_payment_match_daily
+    description: >
+      Daily match rates between GA4 transaction ids and payment-source transactions (Solidgate
+      order_id or Stripe payment_intent), generalized across every account in
+      seed_ga4_payment_account_map.
+    data_tests:
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: pay_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: pay_date
+          config:
+            severity: warn
+    columns:
+      - name: pay_date
+        description: "Reporting date, coalesced from both sides. Solidgate/Stripe are UTC, GA4 is property timezone."
+        data_tests:
+          - not_null
+      - name: ga4_property_name
+        description: "GA4 property this row's account maps to."
+      - name: payment_source
+        description: "Which payment processor this account is on."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+      - name: account_key
+        description: "Solidgate _elt_account_name or Stripe _elt_stripe_account_id, per payment_source."
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_ga4_payment_account_map')
+                field: account_key
+      - name: pay_txn_cnt
+        description: "Count of this account/day's transactions on the payment-processor side (Solidgate order or Stripe payment_intent), regardless of whether GA4 also has a matching transaction_id."
+      - name: ga4_txn_cnt
+        description: "Count of this account/day's GA4 purchase-event transaction ids, regardless of whether the payment processor also has a matching record."
+      - name: ga4_pay_matched
+        description: "Count of transaction ids present on BOTH sides -- the actual successful stitch. The numerator for both match-rate percentages below."
+      - name: pay_not_matched
+        description: "Count of payment-processor transactions with NO matching GA4 transaction id -- most commonly a subscription renewal, which never fires a new GA4 purchase event (see the handoff doc's renewal-stitching gap)."
+      - name: pay_match_pct
+        description: "ga4_pay_matched / pay_txn_cnt, as a percent. 'Of the money we actually collected, what fraction can we trace back to a GA4 visit.'"
+      - name: ga4_match_pct
+        description: "ga4_pay_matched / ga4_txn_cnt, as a percent. 'Of the purchases GA4 saw, what fraction we can confirm actually got paid.'"
+      - name: account_total_mrr_usd
+        description: >
+          THIS IS NOT ATTRIBUTED/MATCHED MRR. It's this account's entire daily MRR total (all
+          customers, matched or not), pulled from solidgate_mrr_usd_daily / stripe_mrr_usd_daily
+          and joined in purely on account+date, with zero reference to pay_txn_id/ga4_txn_id.
+          It exists to give the match-rate columns above a sense of scale ("is this account's MRR
+          big enough that its match rate matters"), not to report how much revenue the matched
+          transactions represent.
+
+  - name: ga4_transaction_attribution
+    description: >
+      Transaction/subscription-grain companion to ga4_payment_match_campaign_daily: keeps one
+      row per payment-processor transaction instead of collapsing to campaign x day, so a
+      specific subscription's revenue can be traced back to the GA4 campaign_id/gclid that
+      acquired it (needed for customer-level LTV/CPA, not just daily ROAS).
+      Covers both Solidgate and Stripe. 
+      Grain: payment_source x account_key x transaction_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - payment_source
+              - account_key
+              - transaction_id
+    columns:
+      - name: payment_source
+        description: "'solidgate' or 'stripe'."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+      - name: account_key
+        description: "Solidgate account name or Stripe account id, per payment_source. Join key to seed_ga4_payment_account_map."
+        data_tests:
+          - not_null
+      - name: transaction_id
+        description: "Solidgate order_id (unique within an account's own namespace) or Stripe PaymentIntent id (globally unique)."
+        data_tests:
+          - not_null
+      - name: pay_date
+        description: "When the payment was attempted, in UTC."
+      - name: subscription_id
+        description: "The subscription this transaction belongs to. Null for Stripe transactions with no invoice at all (most of them, on these accounts). Group on payment_source + this for a per-subscription LTV rollup."
+      - name: invoice_id
+        description: "The invoice this transaction belongs to. Same nullability as subscription_id."
+      - name: order_status
+        description: "Whether the payment went through. Solidgate only -- null for Stripe (int_stripe_transactions has no attempt-level status to carry, see that model's doc)."
+      - name: revenue_usd
+        description: >
+          Solidgate: order_amount_usd, zeroed out for order_status outside ('approved',
+          'settle_ok', 'partial_settled', 'refunded'). Stripe: int_stripe_transactions'
+          amount_usd, already a succeeded-only sum -- passed through unchanged. Both are
+          recognized gross, not net of refunds, same convention as
+          ga4_payment_match_campaign_daily.revenue_usd -- but the two payment_source values
+          are not on the same basis as each other, don't sum across them without checking.
+      - name: match_status
+        description: "'matched' when GA4 also observed this exact transaction_id, 'payment_only' when it didn't (typically a renewal/rebill -- no browser session to emit a GA4 event)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['matched', 'payment_only']
+      - name: ga4_property_name
+        description: "Which GA4 property saw this transaction. Null for payment_only rows."
+      - name: campaign_id
+        description: "Google Ads campaign id GA4 resolved for this transaction. Null for payment_only rows, and for matched rows where GA4 couldn't resolve a campaign."
+      - name: gclid
+        description: "Google Ads click id. Only present when the purchase happened in the same session as the ad click -- a floor on attributable transactions, not a ceiling."
+
+  - name: ga4_solidgate_match_daily
+    description: >
+      Daily match rates between GA4 and Solidgate transactions, per product.
+      sg_match_pct is expected low where rebills are common — a recurring charge has no
+      browser session. ga4_match_pct is expected near 100%; a drop means GA4 is emitting
+      ids Solidgate has never seen.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - match_date
+              - _elt_account_name
+      - elementary.volume_anomalies:
+          arguments:
+            timestamp_column: match_date
+          config:
+            severity: warn
+      - elementary.freshness_anomalies:
+          arguments:
+            timestamp_column: match_date
+          config:
+            severity: warn
+    columns:
+      - name: match_date
+        description: "Reporting date, taken from whichever side has the transaction. Solidgate is UTC, GA4 is property timezone."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: sg_txn_cnt
+        description: "Distinct Solidgate transactions."
+        data_tests:
+          - not_null
+      - name: ga4_txn_cnt
+        description: "Distinct GA4 transactions."
+        data_tests:
+          - not_null
+      - name: ga4_sg_matched
+        description: "Present in both systems."
+        data_tests:
+          - not_null
+      - name: sg_not_matched
+        description: "In Solidgate but not GA4 — mostly recurring rebills."
+      - name: ga4_not_matched
+        description: "In GA4 but not Solidgate — ids we cannot account for."
+      - name: sg_match_pct
+        description: >
+          ga4_sg_matched / sg_txn_cnt * 100. Cannot be averaged across products — sum the
+          counts and divide again.
+      - name: ga4_match_pct
+        description: "ga4_sg_matched / ga4_txn_cnt * 100. Tracking-health metric."

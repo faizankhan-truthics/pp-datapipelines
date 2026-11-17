@@ -1,0 +1,121 @@
+version: 2
+
+models:
+
+  - name: fct_ab_test_users
+    description: >
+      One row per user per experiment flag, for the A/B test results dashboard, for every product.
+      Every user with an [Experiment] Exposure event is in the table, with or without an app
+      account. ab_user_id is the person (the user_key of int_identity_resolution).
+      Users exposed to more than one variant are kept under the variant of their first exposure and
+      flagged is_multi_variant. Only events at or after the first exposure count. Read the
+      conversion rate over is_mature users only. Grain: product x experiment_flag_key x ab_user_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - experiment_flag_key
+              - ab_user_id
+    columns:
+      - name: product
+        description: Registry product the experiment ran on.
+        data_tests:
+          - not_null
+      - name: experiment_flag_key
+        description: Experiment flag key, e.g. default-video-model.
+        data_tests:
+          - not_null
+      - name: ab_user_id
+        description: The person - the user_key of int_identity_resolution, so web and backend app ids, devices and pre-login visits are one user. Falls back to the raw app_user_id or amplitude_id if unresolved. Do not store outside dbt.
+        data_tests:
+          - not_null
+      - name: app_user_id
+        description: The app's account id (the hub id of dim_user_journey, else the Amplitude user_id). Null for users who never had an account.
+      - name: amplitude_id
+        description: Amplitude visitor id (the merged id, as Amplitude counts users). The lowest one if the person has several.
+        data_tests:
+          - not_null
+      - name: is_multi_variant
+        description: The user was exposed to more than one variant of the flag. They stay under the variant of their first exposure.
+        data_tests:
+          - not_null
+      - name: variant
+        description: Variant of the user's first exposure (lowercased, e.g. control, b, c).
+        data_tests:
+          - not_null
+      - name: landing_tool
+        description: First non-null landing page seen on the user's exposure events, e.g. video-gen_generic. Null if none was recorded.
+      - name: first_exposure_ts
+        description: Earliest [Experiment] Exposure for the flag.
+        data_tests:
+          - not_null
+      - name: first_trial_ts
+        description: Earliest trial_started at or after the first exposure. Null if none.
+      - name: first_conversion_ts
+        description: Earliest subscription_converted at or after the first trial, only for users with a payment in dim_user_journey. Null if none.
+      - name: first_cancel_ts
+        description: Earliest subscription_cancel or trial_canceled at or after the first trial. Null if none.
+      - name: cancelled_d1
+        description: First cancel within 1 day of the first trial. False when there is no trial or cancel.
+        data_tests:
+          - not_null
+      - name: cancelled_d7
+        description: First cancel within 7 days of the first trial. False when there is no trial or cancel.
+        data_tests:
+          - not_null
+      - name: converted_7d
+        description: First conversion within ab_test_conversion_window_days (default 7) of the first trial. False when there is no trial.
+        data_tests:
+          - not_null
+      - name: is_mature
+        description: The first trial started at least ab_test_maturity_days (default 8) days ago. False when there is no trial.
+        data_tests:
+          - not_null
+
+  - name: fct_ab_test_users_opengen
+    description: >
+      OpenGen-only metrics for the A/B test dashboard, one row per OpenGen user of fct_ab_test_users
+      (same key; join on product, experiment_flag_key and ab_user_id). Grain: product x
+      experiment_flag_key x ab_user_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - experiment_flag_key
+              - ab_user_id
+    columns:
+      - name: product
+        data_tests:
+          - not_null
+      - name: experiment_flag_key
+        data_tests:
+          - not_null
+      - name: ab_user_id
+        data_tests:
+          - not_null
+      - name: credit_topup_in_trial
+        description: "The user bought at least one credit pack (credits_purchased) during the trial, from the first trial to the earliest of first conversion, first cancel and first trial + ab_test_trial_days (default 5). False when there is no trial."
+        data_tests:
+          - not_null
+      - name: n_generation_started
+        description: Generation starts at or after the first exposure.
+        data_tests:
+          - not_null
+      - name: n_generation_completed
+        description: generation_completed events at or after the first exposure.
+        data_tests:
+          - not_null
+      - name: n_generation_failed
+        description: generation_failed events at or after the first exposure. Failure rate = failed / started.
+        data_tests:
+          - not_null
+      - name: active_d1
+        description: "Retention: a generation_started on the calendar day after the first trial. False when there is no trial."
+        data_tests:
+          - not_null
+      - name: active_d7
+        description: "Retention: a generation_started 7 calendar days after the first trial. False when there is no trial."
+        data_tests:
+          - not_null

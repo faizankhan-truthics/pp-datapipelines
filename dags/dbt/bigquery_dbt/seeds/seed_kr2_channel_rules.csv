@@ -1,0 +1,54 @@
+rule_id,check_order,decision,channel_group,fallback_channel_group,product_match,source_match,medium_match,network_match,condition_key,reason
+E01,10,ignore,,,*,*,*,*,selection_only,Touch has an invalid timestamp or comes after the journey anchor (signup / first payment); applied when the journey picks its touch.
+E02,20,ignore,,,*,*,*,*,internal_return,"Own-site, OAuth/login, Stripe or Solidgate return with no click id or campaign tags: not a new outside visit."
+E03,30,ignore,,,files_editor,file-editor;file-editor.com;files-editor;files-editor.com,*,*,always,Files Editor redirect / own-domain referral does not create an acquisition source.
+E04,40,ignore,,,oqg;qci;qga,scan;scanned;view,*,*,qr_product_flow,"QR product-flow visit (scan / view with no outside referrer), not a new acquisition."
+E05,50,skip_flag,,referral,iqcenter,scanned,*,*,always,Origin of scanned.page visits not verified yet; skip and log.
+E06,60,skip_flag,,referral,qci,qr;qr-code,*,*,always,External qr.pro / qr-code.click origin not verified yet; skip and log.
+R01,65,recover,,,*,~missing,*,*,google_click_no_source,"Missing or malformed source with a Google click id (and no other platform's click): recover source = google, then classify again."
+R02,66,recover,,,*,~missing,*,*,ms_click_no_source,"Missing source with a Microsoft click id (MSCLKID, no other platform's click, not a malformed label): recover source = bing, then classify again."
+Q01,70,skip_flag,,paid_other,*,*,*,*,platform_conflict,Click ids of different ad platforms on one touch or the source contradicts the click id platform; skip and log.
+Q02,80,skip_flag,,paid_other,*,*,*,*,odd_label_with_click,Malformed source / medium with a non-Google platform click id; skip and log.
+P01,100,assign,paid_search,,*,google,cpc,g;s,always,Google CPC on Search (g) or Search partners (s).
+P02,110,assign,paid_cross_network,,*,google,cpc,x,always,Google CPC cross-network (x).
+P03,120,assign,paid_other,,*,google,cpc,dsc,always,"Google CPC is paid, but dsc alone does not establish Search; raw network kept."
+P04,130,assign,paid_other,,*,google,cpc,~missing,always,CPC is paid even without a network; placement unknown.
+P05,140,assign,paid_other,,*,google,cpc,!g;s;x;dsc,always,Unrecognised Google network code on credible CPC.
+P06,150,assign,paid_display,,*,google,display,d,always,Google Display network (d).
+P07,160,assign,paid_other,,*,google,display,ytif;yts;ytis,always,Google video-like network codes do not establish Search or Display; raw network kept.
+P08,170,assign,paid_display,,*,google,display,~missing,google_click,Google Display medium confirmed by a Google click id.
+P09,180,assign,paid_display,,*,google,display,~missing,always,Credible Google Display medium without a click id.
+P10,190,assign,paid_display,,*,google,display,!d;ytif;yts;ytis,always,Explicit Display medium with an unfamiliar network code.
+P11,200,assign,paid_search,,*,bing,cpc,o;s,always,Microsoft search (o) or search partners (s).
+P12,210,assign,paid_audience,,*,bing,cpc,a,always,Microsoft Audience network (a).
+P13,220,assign,paid_other,,*,bing,cpc,~missing,always,Bing CPC is paid even without a network; placement unknown.
+P14,230,assign,paid_other,,*,bing,cpc,!o;s;a,always,Unknown Microsoft placement is not reported as Search.
+P15,240,assign,paid_social,,*,facebook,cpc,*,always,Explicit Facebook CPC (FBCLID alone is not paid).
+P16,250,assign,paid_social,,*,tiktok,cpc;paid,*,always,Explicit TikTok paid medium (TTCLID alone is not paid).
+P17,260,assign,paid_search,,*,google,~invalid,g;s,google_click,Google click id with missing / invalid medium on Search (g / s).
+P18,270,assign,paid_cross_network,,*,google,~invalid,x,google_click,Google click id with missing / invalid medium on cross-network (x).
+P19,280,assign,paid_display,,*,google,~invalid,d,google_click,Google click id with missing / invalid medium on Display (d).
+P20,290,assign,paid_other,,*,google,~invalid,^g;s;x;d,google_click,Google click id with missing / invalid medium and no confident placement.
+P21,292,assign,paid_search,,*,bing,~invalid,o;s,ms_click,Microsoft click id with a missing or invalid medium on Search (o) or Search partners (s).
+P22,294,assign,paid_audience,,*,bing,~invalid,a,ms_click,Microsoft click id with a missing or invalid medium on the Audience network (a).
+P23,296,assign,paid_other,,*,bing,~invalid,^o;s;a,ms_click,Microsoft click id with a missing or invalid medium and no known placement: paid Microsoft traffic.
+N01,300,assign,organic,,*,@search_engine,organic,*,no_paid_click,Explicit organic medium from a search engine.
+N01B,305,assign,organic,,*,@search_engine,~missing,*,search_referrer,Search-engine source without a medium and a search-engine referrer.
+N02,310,skip_flag,,organic,*,@search_engine,organic;~missing,*,always,Search engine name alone is not a reliable search referral; skip and log.
+N03,320,skip_flag,,organic,*,com.google.android.googlequicksearchbox,*,*,always,Google app origin needs independent verification; skip and log.
+N04,330,assign,social_unspecified,,*,@social_source,social,*,no_paid_click,Recognised social source with an explicit social medium.
+N04B,335,assign,social_unspecified,,*,@social_source,~missing,*,social_referrer,Social source without a medium and a matching social referrer.
+N05,340,skip_flag,,social_unspecified,*,@social_source,social;~missing,*,always,Social source not confirmed (FBCLID alone never confirms paid); skip and log.
+N06,350,assign,social_unspecified,,*,ig,social;~missing,*,instagram_referrer,"""ig"" with an instagram.com referrer."
+N07,360,assign,referral,,*,ig,social;~missing,*,ig_com_br_referrer,"""ig"" from ig.com.br is a publisher referral, not Instagram."
+N08,370,skip_flag,,social_unspecified,*,ig,social;~missing,*,always,"Do not infer Instagram from ""ig"" alone; skip and log."
+N09,380,assign,email,,*,*,email;newsletter,*,email_campaign,Email / newsletter medium with a campaign.
+N10,390,skip_flag,,email,*,*,email;newsletter,*,always,Marketing email origin not proven (no campaign); skip and log.
+N11,400,assign,affiliate,,*,*,*,*,affiliate_medium,"Affiliate medium (affiliate, aff, partner(s), cpa) on the touch."
+N12,410,assign,direct,,*,*,*,*,direct_visit,"A recorded visit with no click id, campaign tags or outside referrer (D1), or AnyTrack source direct."
+N13,420,skip_flag,,direct,*,direct,*,*,always,Direct label with other evidence (click id / referrer); skip and log.
+N14,430,skip_flag,,paid_other,*,@intermediary,*,*,always,Ad / search redirect without a reliable originating channel; skip and log.
+N15,440,assign,referral,,*,*,*,*,external_referrer,"Verified external website referrer (not own, auth, payment, search, social or ad intermediary)."
+N16,450,skip_flag,,,*,~missing,*,*,always,"Missing, unknown or malformed source with no other evidence; skip and log."
+N17,460,skip_flag,,other,*,*,*,*,always,No rule applies (unexpected source / medium); skip and log.
+J01,900,assign,unattributed,,*,*,*,*,selection_only,No resolvable channel from any eligible touch; the journey goes on the attribution-review list.

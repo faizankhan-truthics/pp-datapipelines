@@ -1,0 +1,69 @@
+code,error_message,error_next_step
+0.01, General decline,Retry
+0.02, Order expired, Retry
+0.03, Illegal operation (violation of law), Contact support
+0.04, Payment declined by routing rules, Developer action
+1.01, Authentication failed, Retry
+1.02, Access denied, Contact support
+2.01, Invalid data/Order not found, Developer action
+2.02, Invalid amount, Developer action
+2.03, Invalid currency, Developer action
+2.04, Card brand is not supported, Developer action
+2.05, Order not found, Developer action
+2.06, Invalid CVV2 code, Do not retry
+2.07, Request is empty, Developer action
+2.08, Invalid card number, Do not retry
+2.09, Invalid expiration date, Do not retry
+2.10, Invalid 3DS flow on merchant side, Developer action
+2.11, Invalid 3DS flow on bank side, Retry
+2.12, Invalid 3DS flow, Customer action
+2.13, Invalid IP, Developer action
+2.14, Subscription error, Developer action
+2.15, SCA require 3D authentication, Retry
+2.16, Subscription is locked, Retry
+2.17, Coupon is not active, Customer action
+2.18, Invalid product ID, Developer action
+3.01, Card is blocked, Customer action
+3.02, Insufficient funds, Customer action
+3.03, Payment amount limit excess, Customer action
+3.04, Transaction is declined by issuer, Retry
+3.05, Call your bank, Customer action
+3.06, Debit card not supported, Developer action
+3.07, Card brand is not supported, Developer action
+3.08, Do not honor, Retry
+3.09, 3D Secure authentication required (deprecated), Retry
+3.10, Suspected fraud, Contact support
+3.11, Recurring payment cancelled, Do not retry
+3.12, Closed account, Do not retry
+3.13, Cancelled by user, Retry
+4.01, Card is in black list, Do not retry
+4.02, Stolen card, Do not retry
+4.03, Restricted card, Contact support
+4.04, Lost card, Do not retry
+4.05, PSP antifraud, Contact support
+4.06, Blocked by country/IP, Contact support
+4.07, Trusted antifraud system, Do not retry
+4.08, AVS mismatch, Customer action
+4.09, Antifraud service, Contact support
+5.01, 3D secure verification failed, Retry
+5.02, Invalid card token, Do not retry
+5.03, Application error, Retry
+5.04, Merchant is not configured correctly, Contact support
+5.05, Merchant is not activated yet, Contact support
+5.06, Duplicate order, Developer action
+5.07, Exceeded API calls limits, Retry
+5.08, Invalid transaction, Do not retry
+5.09, Merchant not found, Developer action
+5.10, Processor does not support requested API method, Developer action
+5.11, Invalid routing, Developer action
+5.12, Account is blocked, Contact support
+6.01, Unknown decline code, Retry
+6.02, Connection error, Retry
+6.03, Processing issue, Retry
+7.01, Card token not found, Do not retry
+7.02, Google payment error, Customer action
+7.03, Smart cascade decline, Developer action
+7.04, 3DS cascade to 2D, Developer action
+7.05, Apple online payment error, Customer action
+7.06, Token generation error, Retry
+7.07, SCA engine error, Developer action

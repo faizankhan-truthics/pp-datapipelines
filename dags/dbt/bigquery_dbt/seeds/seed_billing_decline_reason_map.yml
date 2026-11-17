@@ -1,0 +1,49 @@
+version: 2
+
+seeds:
+  - name: seed_billing_decline_reason_map
+    description: >
+      Maps each Solidgate error code to one decline vocabulary shared with Stripe, so declines on
+      non-Stripe PSPs (Netevia, Adyen, Checkout) report in the same terms as Stripe
+      `outcome_reason` / `outcome_type`. Built from an October 2026 prod crosswalk of failed
+      Solidgate transactions joined to their Stripe charge on psp_order_id: where a code maps to
+      one Stripe reason in >= 80% of >= 50 matches, that Stripe reason is used; otherwise the
+      Solidgate message in snake_case. Blocked codes keep the Solidgate wording.
+
+    columns:
+      - name: code
+        description: Solidgate error code (same key as solidgate_error_codes.code).
+        data_type: string
+        data_tests:
+          - not_null
+          - unique
+
+      - name: decline_reason
+        description: Decline reason in Stripe `outcome_reason` style (snake_case).
+        data_type: string
+        data_tests:
+          - not_null
+
+      - name: decline_class
+        description: >
+          Decline class aligned with Stripe `outcome_type`: issuer_declined (bank declines),
+          blocked (antifraud / routing rules), invalid (bad request or unsupported card),
+          technical (processing or merchant errors), other.
+        data_type: string
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['issuer_declined', 'blocked', 'invalid', 'technical', 'other']
+
+      - name: reason_source
+        description: stripe_crosswalk when decline_reason came from the Stripe crosswalk, else solidgate_message.
+        data_type: string
+
+      - name: stripe_match_share
+        description: Share of the code's matched failures that carried the most common Stripe reason (October 2026).
+        data_type: float64
+
+      - name: stripe_matches
+        description: Number of the code's failed transactions matched to a Stripe charge (October 2026).
+        data_type: int64

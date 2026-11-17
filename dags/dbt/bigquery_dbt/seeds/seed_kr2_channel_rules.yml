@@ -1,0 +1,95 @@
+version: 2
+
+seeds:
+  - name: seed_kr2_channel_rules
+    description: >
+      KR2 [1/5] channel mapping (Boody's Attribution Specification + Channel Mapping CSV, 49 rules,
+      plus R02 / P21-P23 for a Microsoft click id without a source or medium) in machine form. int_user_touch_classified compiles it into one CASE (macros/kr2_attribution.sql):
+      a touch gets the first rule in check_order whose product / source / medium / network match
+      and condition_key holds. Match specs: `*` any; `~missing` no value; `~invalid` no value or an
+      unknown medium; `@list` a source list of seed_kr2_domain_lists; `!a;b` a value other than a or
+      b; `^a;b` no value or not a / b; `a;b` one of them (a `~missing` item also accepts no value).
+      decision: ignore (not an acquisition touch), recover (R01 / R02: set the source from the click id, classify again),
+      skip_flag (ambiguous: skipped and logged), assign (channel_group). selection_only rules (E01,
+      J01) are applied by dim_user_journey. A skip_flag rule whose touch still names a source has a
+      fallback_channel_group: a journey with no assigned touch takes it, so only a journey with no
+      known source at all is unattributed (the ticket's rule). Changing a rule is a change here, reviewed with
+      Marie / Pankaj (review_with in the business CSV).
+    config:
+      tags: ["journey", "kr2", "seed", "on-full-refresh"]
+    columns:
+      - name: rule_id
+        data_tests:
+          - unique
+          - not_null
+      - name: check_order
+        data_tests:
+          - unique
+          - not_null
+      - name: decision
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['ignore', 'recover', 'skip_flag', 'assign']
+      - name: channel_group
+        description: Set exactly when decision = assign.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - paid_search
+                  - paid_cross_network
+                  - paid_display
+                  - paid_audience
+                  - paid_social
+                  - paid_other
+                  - organic
+                  - social_unspecified
+                  - referral
+                  - email
+                  - affiliate
+                  - direct
+                  - other
+                  - unattributed
+      - name: fallback_channel_group
+        description: >
+          skip_flag rules only: the channel a journey takes from this touch when no eligible touch
+          is assigned. Empty for N16 (no usable source), whose journeys stay unattributed.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - paid_other
+                  - organic
+                  - social_unspecified
+                  - referral
+                  - email
+                  - direct
+                  - other
+      - name: condition_key
+        description: A named boolean of kr2_condition() (macros/kr2_attribution.sql).
+        data_tests:
+          - not_null
+      - name: reason
+        description: Business reason, from the spec; shown as review_reason for skip_flag touches.
+
+  - name: seed_kr2_domain_lists
+    description: >
+      Value lists the KR2 rules read. match_type `source`: utm_source labels (@search_engine,
+      @social_source, @intermediary in the rules). `label`: a dot-delimited part of a referrer host
+      (google matches www.google.co.uk). `host`: a referrer host or its subdomains. Referrer classes,
+      first match wins: own (registry site_domains), payment, oauth, intermediary, webmail, search,
+      instagram, ig_com_br, social, else external.
+    config:
+      tags: ["journey", "kr2", "seed", "on-full-refresh"]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: ['list_name', 'match_type', 'value']
+    columns:
+      - name: match_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['source', 'label', 'host']

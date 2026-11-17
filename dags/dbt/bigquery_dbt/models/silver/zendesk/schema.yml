@@ -1,0 +1,80 @@
+version: 2
+
+models:
+  - name: int_zendesk_refund_tickets
+    description: >
+      Refund-request tickets, identified via Zendesk's AI intent tagging.
+      Grain: ticket_id.
+
+    columns:
+      - name: ticket_id
+        description: Zendesk ticket id.
+        tests:
+          - not_null
+          - unique
+
+      - name: requester_id
+        description: Zendesk user id of the ticket requester.
+        tests:
+          - not_null
+
+      - name: ticket_created_at
+        description: Timestamp the ticket was created.
+
+      - name: email
+        description: >
+          Requester's email address, lower-cased. Join key to Solidgate
+          (int_solidgate_subscription_customers.customer_email) and Stripe
+          (int_stripe_customers.email) customers.
+        tests:
+          - not_null
+
+  - name: int_zendesk_ticket_comments
+    description: >
+      Zendesk ticket comments (public and internal). Grain: one row per
+      comment. Drops html_body/plain_body (duplicates of body) and
+      via/attachments/translations (noisy JSON not needed downstream yet).
+      Not currently referenced by any gold model.
+
+    columns:
+      - name: id
+        description: Unique Zendesk comment identifier.
+        tests:
+          - not_null
+          - unique
+
+      - name: ticket_id
+        description: Parent Zendesk ticket id.
+        tests:
+          - not_null
+
+      - name: audit_id
+        description: Zendesk audit id this comment belongs to.
+
+      - name: author_id
+        description: Zendesk user id of the comment author.
+
+      - name: type
+        description: "`Comment` or `VoiceComment`."
+
+      - name: body
+        description: Plain-text comment body.
+
+      - name: public
+        description: Whether the comment is visible to the requester (false = internal note).
+
+      - name: locale
+        description: Locale the comment was authored in.
+
+      - name: created_at
+        description: Timestamp the comment was created.
+
+      - name: _elt_zendesk_account_id
+        description: Zendesk account associated with the record.
+        tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        tests:
+          - not_null

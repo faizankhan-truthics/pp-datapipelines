@@ -1,0 +1,302 @@
+version: 2
+
+# User journey mart (KR2 [2/5]): every known user of a product, from first visit to current state,
+# across Amplitude, GA4, Solidgate and Stripe. Plan: docs/plans/user_journey_mart.md.
+# Reconciliation logic: docs/identity_reconciliation.md.
+
+models:
+
+  - name: dim_user_journey
+    description: >
+      One row per user of a product -- anonymous Amplitude visitor, signed-up app user, or payer --
+      with identity, first touch, stage timestamps and current outcome. Payments are read across
+      Solidgate and Stripe together. The KR2 taxonomy columns are null until kr2_taxonomy_enabled
+      is set. user_key changes when an identity resolves further: never store it outside dbt.
+      Grain: product x user_key.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - user_key
+    columns:
+      - name: user_key
+        description: Journey-mart user id (md5 of product + anchor). Not the same as int_identity_user_map.user_key; that one is email_user_key here.
+        data_tests:
+          - not_null
+      - name: product
+        data_tests:
+          - not_null
+      - name: anchor_type
+        description: "`app_user`, `payment_email`, `signup_email` (AnyTrack signup, products without Amplitude), `payment_customer` or `visitor`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['app_user', 'payment_email', 'signup_email', 'payment_customer', 'visitor']
+      - name: email_user_key
+        description: md5 of the email (joins user_subscription_mart.dim_user.user_key). Never the address.
+      - name: link_path
+        description: How the user's payer records linked (e.g. `solidgate:order, stripe:payment_metadata`), or how the visitor did.
+      - name: journey_start_date
+        description: Earliest of first touch, first visit, signup and first payment.
+      - name: first_touch_system
+        description: "`amplitude`, `ga4`, `anytrack` or `payment`: the system of the attributing touch (of the earliest touch when unattributed)."
+      - name: click_id_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['gclid', 'gbraid', 'wbraid', 'msclkid', 'fbclid', 'ttclid', 'none']
+      - name: ad_network
+        description: Raw ValueTrack network of the attributing touch (g, s, x, d, o, a, dsc, yt*, ...).
+      - name: channel_group
+        description: >
+          KR2 acquisition channel of the journey (seed_kr2_channel_rules): the channel of the
+          earliest eligible touch a rule assigns; else the fallback channel of the earliest skipped
+          touch that names a source (is_fallback_attribution); else unattributed. Null when
+          kr2_taxonomy_enabled is false.
+        data_tests:
+          - not_null:
+              config:
+                enabled: "{{ var('kr2_taxonomy_enabled', true) }}"
+          - accepted_values:
+              arguments:
+                values:
+                  - paid_search
+                  - paid_cross_network
+                  - paid_display
+                  - paid_audience
+                  - paid_social
+                  - paid_other
+                  - organic
+                  - social_unspecified
+                  - referral
+                  - email
+                  - affiliate
+                  - direct
+                  - other
+                  - unattributed
+      - name: source_resolution_method
+        description: Evidence behind the channel -- click_id, utm, referrer, anytrack, signup_capture, or none.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['click_id', 'utm', 'referrer', 'anytrack', 'signup_capture', 'none']
+      - name: is_unattributed
+        description: channel_group = unattributed -- the KR2 KPI numerator.
+      - name: is_fallback_attribution
+        description: >
+          No eligible touch was assigned, so the channel is the fallback_channel_group of the earliest
+          skipped touch that names a source. Always on the review list.
+      - name: attribution_rule_id
+        description: Rule of the attributing touch (P01 ... N17), or J01 when unattributed.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('seed_kr2_channel_rules')
+                field: rule_id
+      - name: needs_attribution_review
+        description: >
+          Unattributed, a fallback channel, or an eligible touch on or before the attributing one was
+          skipped as ambiguous (a skipped touch after it does not count).
+      - name: attribution_review_reasons
+        description: Up to 10 skipped touches (rule_id, touch_system, touch_ts, reason) behind the review flag.
+      - name: attribution_anchor_ts
+        description: The journey anchor the lookback counts back from -- signup, else first payment.
+      - name: attribution_anchor_type
+        description: "`signup`, `first_payment` or `none` (visitor: no window)."
+      - name: n_eligible_touches
+        description: Touches inside the window that were not ignored.
+      - name: n_skipped_touches
+        description: Of those, touches skipped as ambiguous (skip_flag).
+      - name: is_journey_start_truncated
+        description: >
+          Payer whose journey start was not observed: the first payment predates the first data of
+          every visit source the product has (Amplitude, GA4, AnyTrack), or predates the user's first
+          recorded visit (a customer from before tracking who visited later). days_visit_to_customer is null for them.
+      - name: has_amplitude_history
+        description: The journey started after the product's first Amplitude event, so Amplitude stages can exist.
+      - name: reached_stage
+        description: Furthest stage reached.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['visitor', 'signup', 'activation', 'payment_attempted', 'customer']
+      - name: trial_type
+        description: "`free` ($0 Solidgate order) or `paid`."
+      - name: payment_attempt_ts
+        description: >
+          First payment attempt the processor saw that collected no money: a declined, voided or
+          authorised-but-unsettled Solidgate order, or a failed / never-captured Stripe charge.
+      - name: n_payment_attempts
+        description: Number of those attempts.
+      - name: first_payment_ts
+        description: First successful payment above $0 on either provider.
+      - name: converted_ts
+        description: First paid payment after the first one, or Amplitude subscription_converted.
+      - name: payment_provider
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe', 'both']
+      - name: current_state
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - anonymous_active
+                  - dormant_visitor
+                  - registered_active
+                  - registered_dormant
+                  - active_customer
+                  - churned_customer
+      - name: current_mrr_usd
+        description: Sum of the user's active subscriptions' MRR (user_subscription_mart.fct_subscription).
+      - name: ltv_usd
+        description: Lifetime collected revenue net of refunds, summed over the user's payer records (int_customer_revenue).
+      - name: churn_date
+        description: For churned customers, the last cancellation date (else the last payment date).
+
+  - name: fct_user_journey_events
+    description: >
+      Ordered timeline per user: first visit, signup / activation / trial / checkout, purchases,
+      subscription events, payments, refunds and cancellations, across Amplitude, GA4, AnyTrack,
+      Solidgate and Stripe. amount_usd is in major units. The first paid payment is stage `customer`, later
+      ones `renewal`. Grain: product x user_key x event_source x event_name x event_ts x ref_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product
+              - user_key
+              - event_source
+              - event_name
+              - event_ts
+              - ref_id
+    columns:
+      - name: event_source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['amplitude', 'ga4', 'anytrack', 'solidgate', 'stripe']
+      - name: stage
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - visitor
+                  - touch
+                  - signup
+                  - activation
+                  - trial
+                  - checkout
+                  - purchase
+                  - subscription
+                  - cancel
+                  - payment_attempt
+                  - processor_order
+                  - customer
+                  - renewal
+                  - refund
+                  - churn
+      - name: ref_id
+        description: Order id, charge id, refund id, subscription id or Amplitude event uuid.
+
+  - name: user_identity_reconciliation_daily
+    description: >
+      Daily snapshot per product of how well the sources reconcile: (A) Amplitude vs GA4 signup /
+      visitor counts for the last complete day and per-user link rates, (B) payers linked to an app
+      user per provider, (C) identity quality. Section A is null for products without a GA4 export.
+      Grain: snapshot_date x product.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - product
+    columns:
+      - name: count_date
+        description: The complete day the section A counts are for (snapshot_date - 1).
+      - name: signup_count_diff_pct
+        description: (Amplitude signups - GA4 signups) / GA4 signups.
+      - name: pct_ga4_checkout_visitors_linked
+        description: Share of GA4 visitors with a checkout in the last link_rate_window_days that resolve to an app user (E7+ / E14).
+      - name: pct_non_checkout_signups_linked_to_ga4
+        description: Share of recent signups without a payment that have a GA4 visitor (E14).
+      - name: pct_solidgate_payers_linked
+        description: >
+          Solidgate payers (first payment after the product's first Amplitude event) resolved to an
+          app user. Products without Amplitude: payers after the first AnyTrack event that reached
+          an AnyTrack signup.
+      - name: pct_stripe_payers_linked
+        description: Same for Stripe.
+      - name: pct_solidgate_payers_in_anytrack
+        description: Share of those Solidgate payers whose user has an AnyTrack visitor (E17).
+      - name: pct_stripe_payers_in_anytrack
+        description: Same for Stripe.
+
+  - name: kpi_attribution_completeness_daily
+    description: >
+      KR2 attribution completeness KPI, the single source for the KR2 dashboard. Journey counts
+      from dim_user_journey by the day the journey started. Counts only: compute the unattributed
+      rate as SUM(unattributed_journeys) / SUM(journeys), never as an average of percentages.
+      Rebuilt in full every run, since attribution and stages of past journeys are restated.
+      Grain: date x product x channel_group x source_resolution_method x reached_stage x
+      payment_provider.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - date
+              - product
+              - channel_group
+              - source_resolution_method
+              - reached_stage
+              - payment_provider
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "unattributed_journeys <= journeys"
+    columns:
+      - name: date
+        description: journey_start_date. Null only for undated journeys (date_status = undated).
+      - name: date_status
+        description: "`dated`, or `undated` when the journey has no start date; kept so totals reconcile."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['dated', 'undated']
+      - name: product
+        data_tests:
+          - not_null
+      - name: channel_group
+        description: KR2 channel group; `unattributed` when no source is known.
+        data_tests:
+          - not_null:
+              config:
+                enabled: "{{ var('kr2_taxonomy_enabled', true) }}"
+      - name: source_resolution_method
+        data_tests:
+          - not_null:
+              config:
+                enabled: "{{ var('kr2_taxonomy_enabled', true) }}"
+      - name: reached_stage
+        data_tests:
+          - not_null
+      - name: payment_provider
+        description: "`solidgate`, `stripe`, `both`, or `none` for journeys with no payment."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe', 'both', 'none']
+      - name: journeys
+        description: Journeys (dim_user_journey rows) in the group.
+        data_tests:
+          - not_null
+      - name: unattributed_journeys
+        description: Journeys with is_unattributed -- the KPI numerator.
+        data_tests:
+          - not_null

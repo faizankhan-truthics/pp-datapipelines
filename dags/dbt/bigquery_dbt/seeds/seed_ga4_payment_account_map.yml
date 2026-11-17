@@ -1,0 +1,158 @@
+version: 2
+
+seeds:
+  - name: seed_ga4_payment_account_map
+    description: >
+      Map from every known app/GA4 property to the payment account its `transaction_id` events
+      should be joined against, if any. Covers all properties, including the ones that can't be
+      stitched yet (is_stitchable = false) -- that's what int_ga4_transactions filters on to
+      decide which properties to pull. Adding a newly-stitchable property still needs a source
+      block in `models/bronze/ga4_transactions.yml` by hand (dbt can't loop across source blocks
+      in a YAML file) -- but nothing else; int_ga4_transactions reads the property list straight
+      from this seed via dbt_utils.get_column_values, no separate var to keep in sync.
+
+      has_ga4_export is a DIFFERENT filter than is_stitchable -- the ga4_ads_recon mart
+      (int_ga4_campaign_day_metrics) also reads its property list from this seed, but filters on
+      has_ga4_export instead: it attributes via purchase events, not transaction_id matching, so
+      files_editor/view_page are fine for it despite is_stitchable = false. simpl_ai fails BOTH
+      filters, since it has no BigQuery Export dataset at all -- there's no event stream to read
+      regardless of what you'd do with it.
+
+      The same seed also defines the dashboard's Project/Funnel dimension: rows with
+      is_dashboard_project = true (7 products, per Borys's Project & Funnel URL mapping) feed
+      dim_project and int_ga4_funnel_sessions. project_name, product_type, funnel_signal and
+      ga4_export_exclusion_reason are only set on those rows. (Previously a separate
+      seed_ga4_project_map; merged so property ids / domains / has_ga4_export live in one place.)
+    config:
+      tags: ["ga4", "seed", "on-full-refresh"]
+    data_tests:
+      # an app without a GA4 property must say why
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "ga4_property_id is not null or stitch_exclusion_reason is not null"
+      # a dashboard project must carry its project fields, and say why if it has no GA4 export
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "project_name is not null and product_type is not null and product_name is not null"
+          config:
+            where: "is_dashboard_project"
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "has_ga4_export or ga4_export_exclusion_reason is not null"
+          config:
+            where: "is_dashboard_project"
+
+    columns:
+      - name: ga4_property_name
+        description: >
+          Lowercased suffix of the property's `GA4_PROPERTY_ID_<NAME>` env var
+          (e.g. `infochecker` for `GA4_PROPERTY_ID_INFOCHECKER`). Join key back to
+          `int_ga4_transactions.ga4_property_name`.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: product_name
+        description: >
+          The product's domain, as in bronze_stripe.stripe_accounts.product (e.g. `files-editor.com`).
+          dim_product_payment_map joins every Stripe account of the product to its GA4 property through
+          this column, so one row covers all of a product's Stripe accounts. Unique when set.
+        data_tests:
+          - unique
+
+      - name: ga4_property_id
+        description: >
+          Numeric GA4 property id (the `analytics_<id>` BigQuery Export dataset). Null for apps with no
+          GA4 property yet (those rows carry an exclusion_reason saying so).
+        data_tests:
+          - unique
+
+      - name: has_ga4_export
+        description: >
+          Whether this property has a real `analytics_<id>` BigQuery Export dataset at all.
+          False only for simpl_ai and travel_document_us. int_ga4_campaign_day_metrics (the GA4<->Ads reconciliation
+          mart) filters on this, not on is_stitchable -- see the seed-level description above.
+        data_tests:
+          - not_null
+
+      - name: payment_source
+        description: >
+          Which payment processor this property's transactions should be matched against. Null
+          when is_stitchable = false.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['solidgate', 'stripe']
+              config:
+                where: "is_stitchable"
+
+      - name: account_key
+        description: >
+          Solidgate `_elt_account_name` when payment_source = 'solidgate', or the
+          Stripe `_elt_stripe_account_id` when payment_source = 'stripe'. Null when
+          is_stitchable = false.
+
+      - name: is_stitchable
+        description: >
+          Whether this property currently emits a transaction_id that matches a real payment
+          record. int_ga4_transactions only pulls properties where this is true.
+        data_tests:
+          - not_null
+
+      - name: stitch_exclusion_reason
+        description: >
+          Why is_stitchable is false for this property (payment-stitch exclusion). Null when
+          is_stitchable = true. Not the same as ga4_export_exclusion_reason.
+
+      - name: is_dashboard_project
+        description: "True for the 7 products shown in the dashboard's Project/Funnel filter. dim_project and int_ga4_funnel_sessions select on this."
+        data_tests:
+          - not_null
+
+      - name: project_name
+        description: "Business-facing project name for the dashboard's Project filter. Set only when is_dashboard_project."
+        data_tests:
+          - unique
+
+      - name: product_type
+        description: >
+          'quiz' or 'search' -- which raw funnel vocabulary this project uses. Drives which
+          event_param(s) int_ga4_funnel_sessions reads. Set only when is_dashboard_project.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['quiz', 'search']
+
+      - name: funnel_signal
+        description: >
+          Which raw GA4 field(s) carry this project's funnel value, confirmed against real
+          event data:
+            - test_type: iq_center's event_params.test_type (iq/adhd/love/autism/personality/eq)
+            - page_version_lookup: infochecker/reversly's event_params.page_version +
+              event_params.lookup_type (DEFAULT_PL/DEFAULT_IL + phone/image)
+            - page_version: location_tool's event_params.page_version (LP/TRACK/DEFAULT/HOME)
+            - url_path: publicregistry -- no dedicated event_param exists, so this is parsed
+              from event_params.page_location
+          Null when has_ga4_export is false -- nothing to extract yet.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['test_type', 'page_version_lookup', 'page_version', 'url_path']
+              config:
+                where: "is_dashboard_project and has_ga4_export"
+
+      - name: ga4_export_exclusion_reason
+        description: "Why has_ga4_export is false for a dashboard project (tracelo: aggregate-only export; fitday: no export yet). Null when has_ga4_export is true or the row is not a dashboard project."
+
+      - name: posthog_id
+        description: >
+          PostHog Production project id (team_id in the PostHog export tables). Null for products
+          without PostHog. Airflow reads the PostHog project list from this column.
+        data_tests:
+          - unique
+
+      - name: amplitude_not_applicable_reason
+        description: >
+          Set when the product has no Amplitude project (nothing to join); null when it has one.
+          The project ids live in seed_amplitude_project_map. A test checks every product has
+          either a prod project there or this reason.

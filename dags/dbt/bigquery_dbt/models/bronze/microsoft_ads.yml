@@ -1,0 +1,994 @@
+version: 2
+
+sources:
+  - name: bronze_microsoft_ads
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: >
+      Raw Microsoft Advertising (Bing Ads) performance reports, pulled via the Reporting
+      API (REST) -- see include/config/microsoft_ads_settings.py. One table per report
+      type. Phase 1 (complete, all 5): campaign_performance, account_performance,
+      ad_group_performance, ad_performance, keyword_performance. Phase 2 (in progress):
+      conversion_performance.
+    config:
+      tags: ["microsoft_ads", "bronze"]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+
+    tables:
+      - name: microsoft_ads_campaign_performance
+        description: >
+          Hourly campaign performance (impressions, clicks, spend, conversions, revenue)
+          per Microsoft Ads account/campaign. Grain: account_id x campaign_id x
+          time_period -- unsegmented totals, deliberately excludes attribute columns
+          (DeviceType, Network, BidMatchType, etc.) that would make Microsoft split each
+          row by that attribute instead of returning one combined row (see
+          CAMPAIGN_PERFORMANCE_COLUMNS in dags/microsoft_ads/campaign_performance_pipeline.py).
+          Re-pulled across a trailing lookback window every run to catch Microsoft's own
+          retroactive corrections -- see microsoft_ads_settings.resolve_window.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id, campaign_id, time_period]
+              config:
+                severity: warn
+        columns:
+          # -- attributes/dimensions --
+          - name: account_id
+            description: "Microsoft Ads CustomerAccountId. One per product, once the account-to-product mapping is confirmed."
+          - name: account_name
+            description: "The account name."
+          - name: account_number
+            description: "Microsoft Ads assigned account number (distinct from account_id)."
+          - name: account_status
+            description: "The account status."
+          - name: campaign_id
+          - name: campaign_name
+            description: "The campaign name."
+          - name: campaign_status
+            description: "The campaign status."
+          - name: campaign_type
+            description: "Campaign type, e.g. Search, Shopping, Performance Max, Audience, Dynamic search."
+          - name: campaign_labels
+            description: "Semicolon-delimited labels applied to the campaign."
+          - name: currency_code
+            description: "The account currency type."
+          - name: customer_id
+            description: "Microsoft Ads assigned Customer (manager account) identifier."
+          - name: customer_name
+            description: "The customer (manager account) name."
+          - name: marketing_objective
+            description: "Campaign objective (brand awareness, website visits, sales, leads, app installs). Typically only populated for non-Search campaign types."
+          - name: channel
+            description: "Channels the ad can run on. Typically only populated for non-Search campaign types."
+          - name: sub_channel
+            description: "Refines delivery within the selected channel(s)."
+          - name: tracking_template
+            description: "The campaign's current tracking template."
+          - name: custom_parameters
+            description: "Semicolon-delimited custom URL parameters for the campaign."
+          - name: final_url_suffix
+            description: "URL suffix parameters appended to the landing page URL."
+          - name: base_campaign_id
+            description: "Identifier of an experiment campaign's base campaign; equals campaign_id if not an experiment."
+          - name: time_period
+            description: >
+              Kept exactly as Microsoft's Reporting API returns it, not parsed/split --
+              shape depends on aggregation_type. Daily: "yyyy-mm-dd". Hourly (current):
+              "yyyy-mm-dd|hour" (FormatVersion 2.0; hour is 0-23), in the configured
+              ReportTimeZone (see microsoft_ads_settings.REPORT_TIME_ZONE).
+          - name: aggregation_type
+            description: "Which Aggregation this row's report was requested with (e.g. \"hourly\", \"daily\") -- disambiguates time_period's shape."
+
+          # -- core performance stats --
+          - name: impressions
+            description: "Number of times the ad was displayed."
+          - name: clicks
+            description: "Number of clicks on the ad."
+          - name: ctr
+            description: "Click-through rate: (clicks / impressions) x 100."
+          - name: average_cpc
+            description: "Average cost per click: spend / clicks."
+          - name: average_cpm
+            description: "Average cost per thousand impressions: spend / (impressions / 1000)."
+          - name: spend
+            description: "Total cost of all clicks."
+          - name: conversions_qualified
+            description: "Number of conversions. Replaces Microsoft's deprecated Conversions column."
+          - name: conversion_rate
+            description: "Conversion rate: (conversions / clicks) x 100."
+          - name: cost_per_conversion
+            description: "Cost per conversion: spend / conversions."
+          - name: all_conversions_qualified
+            description: "Conversions across all goals regardless of ExcludeFromBidding setting. Replaces Microsoft's deprecated AllConversions column."
+          - name: all_conversion_rate
+            description: "Conversion rate across all goals regardless of ExcludeFromBidding setting."
+          - name: all_cost_per_conversion
+            description: "Cost per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: all_return_on_ad_spend
+            description: "Return on ad spend (revenue / spend) across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue
+            description: "Reported conversion revenue across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue_per_conversion
+            description: "Revenue per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: return_on_ad_spend
+            description: "Return on ad spend: revenue / spend."
+          - name: revenue
+            description: "Advertiser-reported conversion revenue."
+          - name: revenue_per_conversion
+            description: "Revenue per conversion: revenue / conversions."
+          - name: assists
+            description: "Conversions from other ads in the account that this ad's click preceded (assisted)."
+          - name: cost_per_assist
+            description: "Cost per assist: spend / assists."
+          - name: revenue_per_assist
+            description: "Revenue per assist: revenue / assists."
+          - name: view_through_conversions_qualified
+            description: "Conversions attributed to an impression (no click) within the conversion window, Microsoft Audience Network only. Replaces the deprecated ViewThroughConversions column."
+          - name: view_through_revenue
+            description: "Advertiser-reported revenue from view-through conversions."
+          - name: unknown_customer_conversions
+            description: "Conversions where there wasn't enough data to classify the customer as new or existing."
+          - name: unknown_customer_revenue
+            description: "Revenue from unknown_customer_conversions."
+
+          # -- click quality --
+          - name: low_quality_clicks
+            description: "Clicks with low likelihood of commercial intent; not billed."
+          - name: low_quality_clicks_percent
+            description: "low_quality_clicks as a percentage of (clicks + low_quality_clicks)."
+          - name: low_quality_impressions
+            description: "Impressions resulting from low-quality keyword searches."
+          - name: low_quality_impressions_percent
+            description: "low_quality_impressions as a percentage of (impressions + low_quality_impressions)."
+          - name: low_quality_conversions_qualified
+            description: "Conversions originating from low-quality clicks. Replaces the deprecated LowQualityConversions column."
+          - name: low_quality_general_clicks
+            description: "Low-quality clicks filtered by general methods (deny lists, activity-based detection); not billed."
+          - name: low_quality_sophisticated_clicks
+            description: "Invalid clicks using sophisticated means to appear valid; not billed."
+
+          # -- call extensions --
+          - name: phone_impressions
+            description: "Number of times the tracked phone number was shown."
+          - name: phone_calls
+            description: "Number of calls to the tracked phone number shown with the ad."
+          - name: ptr
+            description: "Phone-through rate: (phone_calls / phone_impressions) x 100."
+
+          # -- quality score family -- static per-day scores; every hourly row on the
+          # same day repeats the same value (not an error, just how Microsoft computes
+          # these). Calculated only from Search traffic; "--" from Microsoft becomes
+          # NULL here via SAFE_CAST.
+          - name: quality_score
+            description: "Overall quality score (1-10), derived from expected_ctr, ad_relevance, and landing_page_experience."
+          - name: ad_relevance
+            description: "Sub-score (1-3) for how relevant the ad is to the customer's search query."
+          - name: expected_ctr
+            description: "Sub-score (1-3) for how well the keyword is expected to compete on click-through rate."
+          - name: landing_page_experience
+            description: "Sub-score (1-3) for the landing page's expected user experience."
+
+      - name: microsoft_ads_account_performance
+        description: >
+          Hourly account performance (impressions, clicks, spend, conversions, revenue)
+          per Microsoft Ads account. Grain: account_id x time_period -- no campaign
+          dimension exists at this report level at all (AccountReportScope only takes
+          AccountIds). Unsegmented totals, same exclusion logic as
+          microsoft_ads_campaign_performance -- see ACCOUNT_PERFORMANCE_COLUMNS in
+          dags/microsoft_ads/account_performance_pipeline.py for exactly which of the 111
+          available columns are excluded and why (Hourly-incompatible, grouping
+          dimensions, or deprecated/always-empty). Re-pulled across a trailing lookback
+          window every run to catch Microsoft's own retroactive corrections -- see
+          microsoft_ads_settings.resolve_window.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id, time_period]
+              config:
+                severity: warn
+        columns:
+          # -- attributes/dimensions --
+          - name: account_id
+            description: "Microsoft Ads CustomerAccountId."
+          - name: account_name
+            description: "The account name."
+          - name: account_number
+            description: "Microsoft Ads assigned account number (distinct from account_id)."
+          - name: account_status
+            description: "The account status."
+          - name: currency_code
+            description: "The account currency type."
+          - name: customer_id
+            description: "Microsoft Ads assigned Customer (manager account) identifier."
+          - name: customer_name
+            description: "The customer (manager account) name."
+          - name: time_period
+            description: >
+              Kept exactly as Microsoft's Reporting API returns it, not parsed/split --
+              shape depends on aggregation_type. Daily: "yyyy-mm-dd". Hourly (current):
+              "yyyy-mm-dd|hour" (FormatVersion 2.0; hour is 0-23), in the configured
+              ReportTimeZone (see microsoft_ads_settings.REPORT_TIME_ZONE).
+          - name: aggregation_type
+            description: "Which Aggregation this row's report was requested with (e.g. \"hourly\", \"daily\") -- disambiguates time_period's shape."
+
+          # -- core performance stats --
+          - name: impressions
+            description: "Number of times the ad was displayed."
+          - name: clicks
+            description: "Number of clicks on the ad."
+          - name: ctr
+            description: "Click-through rate: (clicks / impressions) x 100."
+          - name: average_cpc
+            description: "Average cost per click: spend / clicks."
+          - name: average_cpm
+            description: "Average cost per thousand impressions: spend / (impressions / 1000)."
+          - name: spend
+            description: "Total cost of all clicks."
+          - name: conversions_qualified
+            description: "Number of conversions. Replaces Microsoft's deprecated Conversions column."
+          - name: conversion_rate
+            description: "Conversion rate: (conversions / clicks) x 100."
+          - name: cost_per_conversion
+            description: "Cost per conversion: spend / conversions."
+          - name: all_conversions_qualified
+            description: "Conversions across all goals regardless of ExcludeFromBidding setting."
+          - name: all_conversion_rate
+            description: "Conversion rate across all goals regardless of ExcludeFromBidding setting."
+          - name: all_cost_per_conversion
+            description: "Cost per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: all_return_on_ad_spend
+            description: "Return on ad spend (revenue / spend) across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue
+            description: "Reported conversion revenue across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue_per_conversion
+            description: "Revenue per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: return_on_ad_spend
+            description: "Return on ad spend: revenue / spend."
+          - name: revenue
+            description: "Advertiser-reported conversion revenue."
+          - name: revenue_per_conversion
+            description: "Revenue per conversion: revenue / conversions."
+          - name: assists
+            description: "Conversions from other ads in the account that this ad's click preceded (assisted)."
+          - name: cost_per_assist
+            description: "Cost per assist: spend / assists."
+          - name: revenue_per_assist
+            description: "Revenue per assist: revenue / assists."
+          - name: view_through_conversions_qualified
+            description: "Conversions attributed to an impression (no click), Microsoft Audience Network only."
+          - name: view_through_revenue
+            description: "Advertiser-reported revenue from view-through conversions."
+          - name: unknown_customer_conversions
+            description: "Conversions where there wasn't enough data to classify the customer as new or existing."
+          - name: unknown_customer_revenue
+            description: "Revenue from unknown_customer_conversions."
+
+          # -- click quality --
+          - name: low_quality_clicks
+            description: "Clicks with low likelihood of commercial intent; not billed."
+          - name: low_quality_clicks_percent
+            description: "low_quality_clicks as a percentage of (clicks + low_quality_clicks)."
+          - name: low_quality_conversion_rate
+            description: "Low-quality conversion rate: (low-quality conversions / low_quality_clicks) x 100."
+          - name: low_quality_conversions_qualified
+            description: "Conversions originating from low-quality clicks."
+          - name: low_quality_general_clicks
+            description: "Low-quality clicks filtered by general methods (deny lists, activity-based detection); not billed."
+          - name: low_quality_impressions
+            description: "Impressions resulting from low-quality keyword searches."
+          - name: low_quality_impressions_percent
+            description: "low_quality_impressions as a percentage of (impressions + low_quality_impressions)."
+          - name: low_quality_sophisticated_clicks
+            description: "Invalid clicks using sophisticated means to appear valid; not billed."
+
+          # -- call extensions --
+          - name: phone_calls
+            description: "Number of calls to the tracked phone number shown with the ad."
+          - name: phone_impressions
+            description: "Number of times the tracked phone number was shown."
+          - name: ptr
+            description: "Phone-through rate: (phone_calls / phone_impressions) x 100."
+
+          # -- video -- only populated for accounts running video/Audience-network ad
+          # formats; NULL otherwise.
+          - name: average_cpv
+            description: "Average total spend divided by video views."
+          - name: average_watch_time_per_impression
+            description: "Total watch time (ms) divided by the number of impressions."
+          - name: average_watch_time_per_video_view
+            description: "Total watch time divided by the number of video views."
+          - name: completed_video_views
+            description: "Number of times a person watched the entire video to completion."
+          - name: total_watch_time_in_ms
+            description: "Total amount of time spent watching the video, in milliseconds."
+          - name: video_completion_rate
+            description: "completed_video_views / impressions x 100."
+          - name: video_views
+            description: "Number of times the video was played and watched for at least 2 continuous seconds with >50% of the screen in view."
+          - name: video_views_at_25_percent
+            description: "Number of times a person completed at least 25% of a video."
+          - name: video_views_at_50_percent
+            description: "Number of times a person completed at least 50% of a video."
+          - name: video_views_at_75_percent
+            description: "Number of times a person completed at least 75% of a video."
+          - name: view_through_rate
+            description: "video_views / impressions."
+
+          # -- app install / in-app purchase -- only populated for accounts running App
+          # Install campaigns; NULL otherwise (not applicable to Search campaigns).
+          - name: app_installs
+            description: "Number of times customers install apps through the ads."
+          - name: cost_per_download
+            description: "Cost per download: spend / downloads."
+          - name: cost_per_install
+            description: "Cost per install: spend / installs."
+          - name: cost_per_sale
+            description: "Cost per sale: spend / sales."
+          - name: cpi
+            description: "Cost per install -- average amount charged for each app install."
+          - name: cpp
+            description: "Cost per in-app purchase."
+          - name: cps
+            description: "Cost per in-app subscription."
+          - name: downloads
+            description: "Number of times customers download apps through the ads."
+          - name: installs
+            description: "Total number of installs."
+          - name: post_click_download_rate
+            description: "downloads / clicks x 100."
+          - name: post_click_install_rate
+            description: "installs / clicks x 100."
+          - name: post_install_purchase_rate
+            description: "in-app purchases / installs x 100."
+          - name: post_install_subscription_rate
+            description: "subscriptions / installs x 100."
+          - name: purchases
+            description: "Number of times customers made an in-app purchase through the ads."
+          - name: revenue_per_install
+            description: "Revenue per install: revenue / installs."
+          - name: revenue_per_sale
+            description: "Revenue per sale: revenue / sales."
+          - name: sales
+            description: "Total number of sales."
+          - name: subscriptions
+            description: "Number of times customers purchased a subscription in-app."
+
+          # -- new customer -- excludes the 3 columns Microsoft deprecated Aug 2025
+          # (NewCustomerConversionRate, NewCustomerCPA, NewCustomerReturnOnAdSpend), which
+          # always return empty going forward.
+          - name: new_customer_conversions
+            description: "Total number of new customers who completed a desired action after clicking the ad."
+          - name: new_customer_count
+            description: "Number of new customers who completed an action after clicking the ad."
+          - name: new_customer_revenue
+            description: "Total value of new customer conversions."
+          - name: new_customer_spend
+            description: "Total spend attributed to new customers."
+
+      - name: microsoft_ads_ad_group_performance
+        description: >
+          Hourly ad group performance (impressions, clicks, spend, conversions, revenue,
+          quality score) per Microsoft Ads account/campaign/ad group. Grain: account_id x
+          campaign_id x ad_group_id x time_period -- one level deeper than
+          microsoft_ads_campaign_performance. Unsegmented totals, same exclusion logic as
+          the other two Microsoft Ads bronze tables -- see AD_GROUP_PERFORMANCE_COLUMNS in
+          dags/microsoft_ads/ad_group_performance_pipeline.py for exactly which of the 107
+          available columns are excluded and why (Hourly-incompatible, grouping
+          dimensions, or deprecated/always-empty). Channel/SubChannel/MarketingObjective
+          are kept in pending a row-count verification during the first real backfill
+          (see that file's comments). Re-pulled across a trailing lookback window every
+          run to catch Microsoft's own retroactive corrections -- see
+          microsoft_ads_settings.resolve_window.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id, campaign_id, ad_group_id, time_period]
+              config:
+                severity: warn
+        columns:
+          # -- attributes/dimensions --
+          - name: account_id
+            description: "Microsoft Ads CustomerAccountId."
+          - name: account_name
+            description: "The account name."
+          - name: account_number
+            description: "Microsoft Ads assigned account number (distinct from account_id)."
+          - name: account_status
+            description: "The account status."
+          - name: campaign_id
+          - name: campaign_name
+            description: "The campaign name."
+          - name: campaign_status
+            description: "The campaign status."
+          - name: campaign_type
+            description: "Campaign type, e.g. Search, Shopping, Performance Max, Audience, Dynamic search."
+          - name: base_campaign_id
+            description: "Identifier of an experiment campaign's base campaign; equals campaign_id if not an experiment."
+          - name: ad_group_id
+          - name: ad_group_name
+            description: "The ad group name."
+          - name: ad_group_type
+            description: "Dynamic or Standard for Search/DynamicSearchAds campaigns; empty for other campaign types."
+          - name: ad_group_labels
+            description: "Semicolon-delimited labels applied to the ad group."
+          - name: status
+            description: "The current ad group status."
+          - name: currency_code
+            description: "The account currency type."
+          - name: customer_id
+            description: "Microsoft Ads assigned Customer (manager account) identifier."
+          - name: customer_name
+            description: "The customer (manager account) name."
+          - name: marketing_objective
+            description: "Campaign objective (brand awareness, website visits, sales, leads, app installs). Typically only populated for non-Search campaign types."
+          - name: channel
+            description: "Channels the ad can run on. Typically only populated for non-Search campaign types."
+          - name: sub_channel
+            description: "Refines delivery within the selected channel(s)."
+          - name: tracking_template
+            description: "The ad group's current tracking template."
+          - name: custom_parameters
+            description: "Semicolon-delimited custom URL parameters for the ad group."
+          - name: final_url_suffix
+            description: "URL suffix parameters appended to the landing page URL."
+          - name: time_period
+            description: >
+              Kept exactly as Microsoft's Reporting API returns it, not parsed/split --
+              shape depends on aggregation_type. Daily: "yyyy-mm-dd". Hourly (current):
+              "yyyy-mm-dd|hour" (FormatVersion 2.0; hour is 0-23), in the configured
+              ReportTimeZone (see microsoft_ads_settings.REPORT_TIME_ZONE).
+          - name: aggregation_type
+            description: "Which Aggregation this row's report was requested with (e.g. \"hourly\", \"daily\") -- disambiguates time_period's shape."
+
+          # -- core performance stats --
+          - name: impressions
+            description: "Number of times the ad was displayed."
+          - name: clicks
+            description: "Number of clicks on the ad."
+          - name: ctr
+            description: "Click-through rate: (clicks / impressions) x 100."
+          - name: average_cpc
+            description: "Average cost per click: spend / clicks."
+          - name: average_cpm
+            description: "Average cost per thousand impressions: spend / (impressions / 1000)."
+          - name: spend
+            description: "Total cost of all clicks."
+          - name: conversions_qualified
+            description: "Number of conversions. Replaces Microsoft's deprecated Conversions column."
+          - name: conversion_rate
+            description: "Conversion rate: (conversions / clicks) x 100."
+          - name: cost_per_conversion
+            description: "Cost per conversion: spend / conversions."
+          - name: all_conversions_qualified
+            description: "Conversions across all goals regardless of ExcludeFromBidding setting."
+          - name: all_conversion_rate
+            description: "Conversion rate across all goals regardless of ExcludeFromBidding setting."
+          - name: all_cost_per_conversion
+            description: "Cost per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: all_return_on_ad_spend
+            description: "Return on ad spend (revenue / spend) across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue
+            description: "Reported conversion revenue across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue_per_conversion
+            description: "Revenue per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: return_on_ad_spend
+            description: "Return on ad spend: revenue / spend."
+          - name: revenue
+            description: "Advertiser-reported conversion revenue."
+          - name: revenue_per_conversion
+            description: "Revenue per conversion: revenue / conversions."
+          - name: assists
+            description: "Conversions from other ads in the account that this ad's click preceded (assisted)."
+          - name: cost_per_assist
+            description: "Cost per assist: spend / assists."
+          - name: revenue_per_assist
+            description: "Revenue per assist: revenue / assists."
+          - name: view_through_conversions_qualified
+            description: "Conversions attributed to an impression (no click), Microsoft Audience Network only."
+          - name: view_through_revenue
+            description: "Advertiser-reported revenue from view-through conversions."
+
+          # -- call extensions --
+          - name: phone_calls
+            description: "Number of calls to the tracked phone number shown with the ad."
+          - name: phone_impressions
+            description: "Number of times the tracked phone number was shown."
+          - name: ptr
+            description: "Phone-through rate: (phone_calls / phone_impressions) x 100."
+
+          # -- quality score family -- static per-day scores; every hourly row on the
+          # same day repeats the same value. Calculated only from Search traffic; "--"
+          # from Microsoft becomes NULL here via SAFE_CAST.
+          - name: quality_score
+            description: "Overall quality score (1-10), derived from expected_ctr, ad_relevance, and landing_page_experience."
+          - name: ad_relevance
+            description: "Sub-score (1-3) for how relevant the ad is to the customer's search query."
+          - name: expected_ctr
+            description: "Sub-score (1-3) for how well the keyword is expected to compete on click-through rate."
+          - name: landing_page_experience
+            description: "Sub-score (1-3) for the landing page's expected user experience."
+
+          # -- video -- only populated for ad groups running video/Audience-network ad
+          # formats; NULL otherwise.
+          - name: average_cpv
+            description: "Average total spend divided by video views."
+          - name: average_watch_time_per_impression
+            description: "Total watch time (ms) divided by the number of impressions."
+          - name: average_watch_time_per_video_view
+            description: "Total watch time divided by the number of video views."
+          - name: completed_video_views
+            description: "Number of times a person watched the entire video to completion."
+          - name: total_watch_time_in_ms
+            description: "Total amount of time spent watching the video, in milliseconds."
+          - name: video_completion_rate
+            description: "completed_video_views / impressions x 100."
+          - name: video_views
+            description: "Number of times the video was played and watched for at least 2 continuous seconds with >50% of the screen in view."
+          - name: video_views_at_25_percent
+            description: "Number of times a person completed at least 25% of a video."
+          - name: video_views_at_50_percent
+            description: "Number of times a person completed at least 50% of a video."
+          - name: video_views_at_75_percent
+            description: "Number of times a person completed at least 75% of a video."
+          - name: view_through_rate
+            description: "video_views / impressions."
+
+          # -- app install / in-app purchase -- only populated for ad groups running App
+          # Install campaigns; NULL otherwise.
+          - name: cost_per_install
+            description: "Cost per install: spend / installs."
+          - name: cost_per_sale
+            description: "Cost per sale: spend / sales."
+          - name: installs
+            description: "Total number of installs."
+          - name: revenue_per_install
+            description: "Revenue per install: revenue / installs."
+          - name: revenue_per_sale
+            description: "Revenue per sale: revenue / sales."
+          - name: sales
+            description: "Total number of sales."
+
+      - name: microsoft_ads_ad_performance
+        description: >
+          Hourly ad performance (impressions, clicks, spend, conversions, revenue, ad
+          creative attributes) per Microsoft Ads account/campaign/ad group/ad. Grain:
+          account_id x campaign_id x ad_group_id x ad_id x time_period -- one level
+          deeper than microsoft_ads_ad_group_performance. Unsegmented totals, same
+          exclusion logic as the other Microsoft Ads bronze tables -- see
+          AD_PERFORMANCE_COLUMNS in dags/microsoft_ads/ad_performance_pipeline.py for
+          exactly which of the 95 available columns are excluded and why
+          (Hourly-incompatible, grouping dimensions, or deprecated/always-empty).
+          ctr/conversion_rate/all_conversion_rate strip a literal "%" suffix before
+          casting -- see that file's comments and merge_ad_performance.sql. Re-pulled
+          across a trailing lookback window every run to catch Microsoft's own
+          retroactive corrections -- see microsoft_ads_settings.resolve_window.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id, campaign_id, ad_group_id, ad_id, time_period]
+              config:
+                severity: warn
+        columns:
+          # -- attributes/dimensions --
+          - name: account_id
+            description: "Microsoft Ads CustomerAccountId."
+          - name: account_name
+            description: "The account name."
+          - name: account_number
+            description: "Microsoft Ads assigned account number (distinct from account_id)."
+          - name: account_status
+            description: "The account status."
+          - name: campaign_id
+          - name: campaign_name
+            description: "The campaign name."
+          - name: campaign_status
+            description: "The campaign status."
+          - name: campaign_type
+            description: "Campaign type, e.g. Search, Shopping, Performance Max, Audience, Dynamic search."
+          - name: base_campaign_id
+            description: "Identifier of an experiment campaign's base campaign; equals campaign_id if not an experiment."
+          - name: ad_group_id
+          - name: ad_group_name
+            description: "The ad group name."
+          - name: ad_group_status
+            description: "The ad group status."
+          - name: ad_id
+          - name: ad_type
+            description: "The ad type."
+          - name: ad_status
+            description: "The ad status."
+          - name: ad_labels
+            description: "Semicolon-delimited labels applied to the ad."
+          - name: currency_code
+            description: "The account currency type."
+          - name: customer_id
+            description: "Microsoft Ads assigned Customer (manager account) identifier."
+          - name: customer_name
+            description: "The customer (manager account) name."
+          - name: marketing_objective
+            description: "Campaign objective (brand awareness, website visits, sales, leads, app installs). Typically only populated for non-Search campaign types."
+          - name: channel
+            description: "Channels the ad can run on. Typically only populated for non-Search campaign types."
+          - name: sub_channel
+            description: "Refines delivery within the selected channel(s)."
+          - name: tracking_template
+            description: "The ad's current tracking template."
+          - name: custom_parameters
+            description: "Semicolon-delimited custom URL parameters for the ad."
+          - name: final_url_suffix
+            description: "URL suffix parameters appended to the landing page URL."
+
+          # -- ad creative --
+          - name: ad_title
+            description: "The ad title."
+          - name: ad_description
+            description: "The first ad description shown below the path."
+          - name: ad_description2
+            description: "The second ad description, if present."
+          - name: display_url
+            description: "The ad display URL."
+          - name: final_url
+            description: "The ad's Final URL (pre dynamic-text substitution). Only the first URL in the list is reported."
+          - name: final_mobile_url
+            description: "The ad's Final Mobile URL. Only the first URL in the list is reported."
+          - name: final_app_url
+            description: "Reserved for future use by Microsoft."
+          - name: title_part1
+            description: "Title part 1 attribute of the ad."
+          - name: title_part2
+            description: "Title part 2 attribute of the ad."
+          - name: title_part3
+            description: "Title part 3 attribute of the ad."
+          - name: headline
+            description: "Shorter responsive ad headline (Audience campaigns)."
+          - name: long_headline
+            description: "Longer responsive ad headline (Audience campaigns)."
+          - name: business_name
+            description: "Business name shown in the ad, depending on placement (Audience campaigns only)."
+          - name: path1
+            description: "Path 1 attribute of the ad."
+          - name: path2
+            description: "Path 2 attribute of the ad."
+          - name: ad_strength
+            description: "Ad strength score for responsive search ads (Poor/Average/Good/Excellent/pending)."
+          - name: ad_strength_action_items
+            description: "Suggested improvements based on the ad's ad_strength score."
+          - name: time_period
+            description: >
+              Kept exactly as Microsoft's Reporting API returns it, not parsed/split --
+              shape depends on aggregation_type. Daily: "yyyy-mm-dd". Hourly (current):
+              "yyyy-mm-dd|hour" (FormatVersion 2.0; hour is 0-23), in the configured
+              ReportTimeZone (see microsoft_ads_settings.REPORT_TIME_ZONE).
+          - name: aggregation_type
+            description: "Which Aggregation this row's report was requested with (e.g. \"hourly\", \"daily\") -- disambiguates time_period's shape."
+
+          # -- core performance stats --
+          - name: impressions
+            description: "Number of times the ad was displayed."
+          - name: clicks
+            description: "Number of clicks on the ad."
+          - name: ctr
+            description: "Click-through rate: (clicks / impressions) x 100. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: average_cpc
+            description: "Average cost per click: spend / clicks."
+          - name: average_cpm
+            description: "Average cost per thousand impressions: spend / (impressions / 1000)."
+          - name: spend
+            description: "Total cost of all clicks."
+          - name: conversions_qualified
+            description: "Number of conversions. Replaces Microsoft's deprecated Conversions column."
+          - name: conversion_rate
+            description: "Conversion rate: (conversions / clicks) x 100. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: cost_per_conversion
+            description: "Cost per conversion: spend / conversions."
+          - name: all_conversions_qualified
+            description: "Conversions across all goals regardless of ExcludeFromBidding setting."
+          - name: all_conversion_rate
+            description: "Conversion rate across all goals regardless of ExcludeFromBidding setting. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: all_cost_per_conversion
+            description: "Cost per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: all_return_on_ad_spend
+            description: "Return on ad spend (revenue / spend) across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue
+            description: "Reported conversion revenue across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue_per_conversion
+            description: "Revenue per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: return_on_ad_spend
+            description: "Return on ad spend: revenue / spend."
+          - name: revenue
+            description: "Advertiser-reported conversion revenue."
+          - name: revenue_per_conversion
+            description: "Revenue per conversion: revenue / conversions."
+          - name: assists
+            description: "Conversions from other ads in the account that this ad's click preceded (assisted)."
+          - name: cost_per_assist
+            description: "Cost per assist: spend / assists."
+          - name: revenue_per_assist
+            description: "Revenue per assist: revenue / assists."
+          - name: view_through_conversions_qualified
+            description: "Conversions attributed to an impression (no click), Microsoft Audience Network only."
+          - name: view_through_revenue
+            description: "Advertiser-reported revenue from view-through conversions."
+
+          # -- video -- only populated for ads running video/Audience-network ad
+          # formats; NULL otherwise.
+          - name: average_cpv
+            description: "Average total spend divided by video views."
+          - name: average_watch_time_per_impression
+            description: "Total watch time (ms) divided by the number of impressions."
+          - name: average_watch_time_per_video_view
+            description: "Total watch time divided by the number of video views."
+          - name: completed_video_views
+            description: "Number of times a person watched the entire video to completion."
+          - name: total_watch_time_in_ms
+            description: "Total amount of time spent watching the video, in milliseconds."
+          - name: video_completion_rate
+            description: "completed_video_views / impressions x 100. Confirmed NOT affected by the %-suffix issue despite being 'Rate'-named."
+          - name: video_views
+            description: "Number of times the video was played and watched for at least 2 continuous seconds with >50% of the screen in view."
+          - name: video_views_at_25_percent
+            description: "Number of times a person completed at least 25% of a video."
+          - name: video_views_at_50_percent
+            description: "Number of times a person completed at least 50% of a video."
+          - name: video_views_at_75_percent
+            description: "Number of times a person completed at least 75% of a video."
+          - name: view_through_rate
+            description: "video_views / impressions. Confirmed NOT affected by the %-suffix issue despite being 'Rate'-named."
+
+      - name: microsoft_ads_keyword_performance
+        description: >
+          Hourly keyword performance (impressions, clicks, spend, conversions, revenue,
+          quality score, bids) per Microsoft Ads account/campaign/ad group/keyword.
+          Grain: account_id x campaign_id x ad_group_id x keyword_id x time_period --
+          one level deeper than microsoft_ads_ad_group_performance. Unsegmented totals,
+          same exclusion logic as the other Microsoft Ads bronze tables -- see
+          KEYWORD_PERFORMANCE_COLUMNS in dags/microsoft_ads/keyword_performance_pipeline.py
+          for exactly which of the 83 available columns are excluded and why
+          (Hourly-incompatible including all 4 Historical* columns, grouping
+          dimensions, deprecated/always-empty, or DestinationUrl's post-substitution
+          row-split risk). ctr/conversion_rate/all_conversion_rate strip a literal "%"
+          suffix before casting -- see that file's comments and
+          merge_keyword_performance.sql. Microsoft's own docs say this report should not
+          be used for Shopping campaigns. Re-pulled across a trailing lookback window
+          every run to catch Microsoft's own retroactive corrections -- see
+          microsoft_ads_settings.resolve_window.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id, campaign_id, ad_group_id, keyword_id, time_period]
+              config:
+                severity: warn
+        columns:
+          # -- attributes/dimensions --
+          - name: account_id
+            description: "Microsoft Ads CustomerAccountId."
+          - name: account_name
+            description: "The account name."
+          - name: account_number
+            description: "Microsoft Ads assigned account number (distinct from account_id)."
+          - name: account_status
+            description: "The account status."
+          - name: campaign_id
+          - name: campaign_name
+            description: "The campaign name."
+          - name: campaign_status
+            description: "The campaign status."
+          - name: base_campaign_id
+            description: "Identifier of an experiment campaign's base campaign; equals campaign_id if not an experiment."
+          - name: ad_group_id
+          - name: ad_group_name
+            description: "The ad group name."
+          - name: ad_group_status
+            description: "The ad group status."
+          - name: keyword
+            description: "The keyword text."
+          - name: keyword_id
+          - name: keyword_status
+            description: "The keyword status."
+          - name: keyword_labels
+            description: "Semicolon-delimited labels applied to the keyword."
+          - name: bid_strategy_type
+            description: "The bid strategy type (e.g. EnhancedCpc, ManualCpc, MaxClicks, MaxConversions, TargetCpa)."
+          - name: current_max_cpc
+            description: "The maximum CPC bid in effect at report generation time -- not a historical/moving bid."
+          - name: mainline1_bid
+            description: "Estimated bid to place the ad at the very top of search results. Reference only, not a guarantee."
+          - name: mainline_bid
+            description: "Estimated bid to place the ad on the first page of search results. Reference only, not a guarantee."
+          - name: first_page_bid
+            description: "Estimated bid for the ad to appear on the first page of search results. Reference only, not a guarantee."
+          - name: currency_code
+            description: "The account currency type."
+          - name: marketing_objective
+            description: "Campaign objective (brand awareness, website visits, sales, leads, app installs). Typically only populated for non-Search campaign types."
+          - name: channel
+            description: "Channels the ad can run on. Typically only populated for non-Search campaign types."
+          - name: sub_channel
+            description: "Refines delivery within the selected channel(s)."
+          - name: tracking_template
+            description: "The keyword's current tracking template."
+          - name: custom_parameters
+            description: "Semicolon-delimited custom URL parameters for the keyword."
+          - name: final_url
+            description: "The keyword's Final URL (pre dynamic-text substitution). Only the first URL in the list is reported."
+          - name: final_mobile_url
+            description: "The keyword's Final Mobile URL. Only the first URL in the list is reported."
+          - name: final_app_url
+            description: "Reserved for future use by Microsoft."
+          - name: final_url_suffix
+            description: "URL suffix parameters appended to the landing page URL."
+
+          # -- quality score family -- static per-day scores; every hourly row on the
+          # same day repeats the same value. Calculated only from Search traffic; "--"
+          # from Microsoft becomes NULL here via SAFE_CAST.
+          - name: quality_score
+            description: "Overall quality score (1-10), derived from expected_ctr, ad_relevance, and landing_page_experience."
+          - name: expected_ctr
+            description: "Sub-score (1-3) for how well the keyword is expected to compete on click-through rate."
+          - name: ad_relevance
+            description: "Sub-score (1-3) for how relevant the ad is to the customer's search query."
+          - name: landing_page_experience
+            description: "Sub-score (1-3) for the landing page's expected user experience."
+          - name: quality_impact
+            description: "Estimated impression-count impact (0=none, 1=low, 2=medium, 3=high) of improving this keyword's quality score."
+          - name: time_period
+            description: >
+              Kept exactly as Microsoft's Reporting API returns it, not parsed/split --
+              shape depends on aggregation_type. Daily: "yyyy-mm-dd". Hourly (current):
+              "yyyy-mm-dd|hour" (FormatVersion 2.0; hour is 0-23), in the configured
+              ReportTimeZone (see microsoft_ads_settings.REPORT_TIME_ZONE).
+          - name: aggregation_type
+            description: "Which Aggregation this row's report was requested with (e.g. \"hourly\", \"daily\") -- disambiguates time_period's shape."
+
+          # -- core performance stats --
+          - name: impressions
+            description: "Number of times the ad was displayed."
+          - name: clicks
+            description: "Number of clicks on the ad."
+          - name: ctr
+            description: "Click-through rate: (clicks / impressions) x 100. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: average_cpc
+            description: "Average cost per click: spend / clicks."
+          - name: average_cpm
+            description: "Average cost per thousand impressions: spend / (impressions / 1000)."
+          - name: spend
+            description: "Total cost of all clicks."
+          - name: conversions_qualified
+            description: "Number of conversions. Replaces Microsoft's deprecated Conversions column."
+          - name: conversion_rate
+            description: "Conversion rate: (conversions / clicks) x 100. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: cost_per_conversion
+            description: "Cost per conversion: spend / conversions."
+          - name: all_conversions_qualified
+            description: "Conversions across all goals regardless of ExcludeFromBidding setting."
+          - name: all_conversion_rate
+            description: "Conversion rate across all goals regardless of ExcludeFromBidding setting. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: all_cost_per_conversion
+            description: "Cost per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: all_return_on_ad_spend
+            description: "Return on ad spend (revenue / spend) across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue
+            description: "Reported conversion revenue across all goals regardless of ExcludeFromBidding setting."
+          - name: all_revenue_per_conversion
+            description: "Revenue per conversion across all goals regardless of ExcludeFromBidding setting."
+          - name: return_on_ad_spend
+            description: "Return on ad spend: revenue / spend."
+          - name: revenue
+            description: "Advertiser-reported conversion revenue."
+          - name: revenue_per_conversion
+            description: "Revenue per conversion: revenue / conversions."
+          - name: assists
+            description: "Conversions from other ads in the account that this keyword's click preceded (assisted)."
+          - name: cost_per_assist
+            description: "Cost per assist: spend / assists."
+          - name: revenue_per_assist
+            description: "Revenue per assist: revenue / assists."
+          - name: view_through_conversions_qualified
+            description: "Conversions attributed to an impression (no click), Microsoft Audience Network only."
+          - name: view_through_revenue
+            description: "Advertiser-reported revenue from view-through conversions."
+
+      - name: microsoft_ads_conversion_performance
+        description: >
+          Hourly conversion performance per Microsoft Ads account/campaign/ad
+          group/keyword, split by conversion goal. Grain: account_id x campaign_id x
+          ad_group_id x keyword_id x goal_id x time_period -- one level beyond
+          microsoft_ads_keyword_performance. See CONVERSION_PERFORMANCE_COLUMNS in
+          dags/microsoft_ads/conversion_performance_pipeline.py for excluded columns.
+          ctr/conversion_rate/all_conversion_rate strip a literal "%" suffix before
+          casting. Re-pulled across a trailing lookback window every run.
+        data_tests:
+          - dbt_utils.unique_combination_of_columns:
+              arguments:
+                combination_of_columns: [account_id, campaign_id, ad_group_id, keyword_id, goal_id, time_period]
+              config:
+                severity: warn
+        columns:
+          - name: account_id
+            description: "Microsoft Ads CustomerAccountId."
+          - name: account_name
+            description: "The account name."
+          - name: account_number
+            description: "Microsoft Ads assigned account number (distinct from account_id)."
+          - name: account_status
+            description: "The account status."
+          - name: campaign_id
+          - name: campaign_name
+            description: "The campaign name."
+          - name: campaign_status
+            description: "The campaign status."
+          - name: ad_group_id
+          - name: ad_group_name
+            description: "The ad group name."
+          - name: ad_group_status
+            description: "The ad group status."
+          - name: keyword
+            description: "The keyword text."
+          - name: keyword_id
+          - name: keyword_status
+            description: "The keyword status."
+          - name: goal
+            description: "The conversion goal's name."
+          - name: goal_id
+            description: "Microsoft Ads assigned identifier of the conversion goal. Microsoft returns the string '0' for no goal; NULL is also allowed defensively."
+          - name: goal_type
+            description: "Conversion goal type (e.g. AppInstall, Duration, Event, InStoreTransaction, OfflineConversion, PagesViewedPerVisit, Url)."
+          - name: marketing_objective
+            description: "Campaign objective (brand awareness, website visits, sales, leads, app installs). Typically only populated for non-Search campaign types."
+          - name: channel
+            description: "Channels the ad can run on. Typically only populated for non-Search campaign types."
+          - name: sub_channel
+            description: "Refines delivery within the selected channel(s)."
+          - name: time_period
+            description: >
+              Kept exactly as Microsoft's Reporting API returns it, not parsed/split --
+              shape depends on aggregation_type. Daily: "yyyy-mm-dd". Hourly (current):
+              "yyyy-mm-dd|hour" (FormatVersion 2.0; hour is 0-23), in the configured
+              ReportTimeZone (see microsoft_ads_settings.REPORT_TIME_ZONE).
+          - name: aggregation_type
+            description: "Which Aggregation this row's report was requested with (e.g. \"hourly\", \"daily\") -- disambiguates time_period's shape."
+          - name: impressions
+            description: "Number of times the ad was displayed."
+          - name: clicks
+            description: "Number of clicks on the ad."
+          - name: ctr
+            description: "Click-through rate: (clicks / impressions) x 100. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: spend
+            description: "Total cost of all clicks."
+          - name: conversions_qualified
+            description: "Number of conversions for this goal. Replaces Microsoft's deprecated Conversions column."
+          - name: conversion_rate
+            description: "Conversion rate: (conversions / clicks) x 100. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: cost_per_conversion
+            description: "Cost per conversion: spend / conversions."
+          - name: all_conversions_qualified
+            description: "Conversions for this row's goal_id, including ones with ExcludeFromBidding=true -- not a total across other goal_id rows."
+          - name: all_conversion_rate
+            description: "Conversion rate for this row's goal_id, including ExcludeFromBidding=true conversions -- not a total across other goal_id rows. Microsoft's CSV returns this with a literal % suffix, stripped before casting."
+          - name: all_cost_per_conversion
+            description: "Cost per conversion for this row's goal_id, including ExcludeFromBidding=true conversions -- not a total across other goal_id rows."
+          - name: all_return_on_ad_spend
+            description: "Return on ad spend (revenue / spend) for this row's goal_id, including ExcludeFromBidding=true conversions -- not a total across other goal_id rows."
+          - name: all_revenue
+            description: "Reported conversion revenue for this row's goal_id, including ExcludeFromBidding=true conversions -- not a total across other goal_id rows."
+          - name: all_revenue_per_conversion
+            description: "Revenue per conversion for this row's goal_id, including ExcludeFromBidding=true conversions -- not a total across other goal_id rows."
+          - name: return_on_ad_spend
+            description: "Return on ad spend: revenue / spend."
+          - name: revenue
+            description: "Advertiser-reported conversion revenue for this goal."
+          - name: revenue_per_conversion
+            description: "Revenue per conversion: revenue / conversions."
+          - name: assists
+            description: "Conversions from other ads in the account that this keyword's click preceded (assisted)."
+          - name: cost_per_assist
+            description: "Cost per assist: spend / assists."
+          - name: revenue_per_assist
+            description: "Revenue per assist: revenue / assists."
+          - name: view_through_conversions_qualified
+            description: "Conversions attributed to an impression (no click), Microsoft Audience Network only."
+          - name: view_through_revenue
+            description: "Advertiser-reported revenue from view-through conversions."

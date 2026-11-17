@@ -1,0 +1,76 @@
+version: 2
+
+seeds:
+  - name: seed_billing_health_baselines
+    description: >
+      Each product's own baseline per billing health metric, so status is judged against what is
+      normal for that product, not one company number (ticket: "alert vs each product's own
+      baseline"). Computed from prod data with include/sql/billing_health/compute_baselines.sql
+      for the period in period_start / period_end; re-run it and replace this file to re-baseline
+      (e.g. after the shadow period or a retry-strategy change). A baseline is used only when
+      n_periods meets the minimum (5 days for section A, 3 cohorts for B and C); otherwise the
+      metric shows "no baseline".
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - product_key
+              - section
+              - metric
+              - segment
+
+    columns:
+      - name: product_key
+        description: Product, as in seed_billing_health_products.product_key.
+        data_type: string
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_billing_health_products')
+                field: product_key
+
+      - name: section
+        description: Report section (A payment health, B retry performance, C trial-to-paid).
+        data_type: string
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['A', 'B', 'C']
+
+      - name: metric
+        description: Metric the baseline is for.
+        data_type: string
+        data_tests:
+          - not_null
+
+      - name: segment
+        description: Sub-group within the product, e.g. "5-day trial" for section C; empty otherwise.
+        data_type: string
+
+      - name: baseline
+        description: The product's normal value (a share 0-1, or a daily count for retries_after_do_not_retry).
+        data_type: float64
+        data_tests:
+          - not_null
+
+      - name: sd
+        description: Standard deviation across the periods used (how much it normally moves).
+        data_type: float64
+
+      - name: n_periods
+        description: Days (section A) or weekly cohorts (B, C) the baseline is averaged over.
+        data_type: int64
+
+      - name: period_start
+        description: First day of the data the baseline was computed from.
+        data_type: date
+
+      - name: period_end
+        description: Last day of the data the baseline was computed from.
+        data_type: date
+
+      - name: method
+        description: How the baseline was computed.
+        data_type: string

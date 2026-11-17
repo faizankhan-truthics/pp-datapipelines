@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "queue-policy"
+version = "0.1.0"
+description = "Routes TaskInstances to Astro worker queues based on run type."
+requires-python = ">=3.9"
+
+# Registered as an Airflow cluster policy via the setuptools entry point below.
+# Unlike include/airflow_local_settings.py (local-CLI only, ignored on Astro
+# Deployments), an installed package with an `airflow.policy` entry point is
+# picked up by Airflow the same way in both local dev and on Astro.
+[project.entry-points."airflow.policy"]
+queue_policy = "queue_policy.policies"
+
+[tool.setuptools.packages.find]
+include = ["queue_policy*"]

@@ -1,0 +1,151 @@
+name: Release Notification
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install python-semantic-release
+        run: |
+          pip install python-semantic-release==10.4.1
+          pip install "GitPython<3.1.60"
+
+      - name: Capture previous tag
+        id: pre_tag
+        run: echo "tag=$(git describe --tags --abbrev=0 2>/dev/null || echo '')" >> "$GITHUB_OUTPUT"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release -vv version
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: semantic-release -vv publish
+
+      - name: Get GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(git describe --tags --abbrev=0)
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          gh release view "$TAG" --json \
+            name,body,author,url \
+            > /tmp/release.json
+
+      - name: Build Slack payload
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_TRIGGERED_BY: ${{ github.actor }}
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+
+          with open("/tmp/release.json") as f:
+              release = json.load(f)
+
+          max_length = 2500
+
+          body = (release.get("body") or "").strip()
+
+          if len(body) > max_length:
+              body = body[:max_length].rstrip() + "\n…"
+
+          release_name = (release.get("name") or "").strip()
+          release_url = release.get("url", "")
+
+          tag = os.environ["RELEASE_TAG"]
+          triggered_by = os.environ["RELEASE_TRIGGERED_BY"]
+
+          if not release_name:
+              release_name = tag
+
+          payload = {
+              "text": f"🚀 New release published: {tag}",
+              "blocks": [
+                  {
+                      "type": "header",
+                      "text": {
+                          "type": "plain_text",
+                          "text": f"🚀 New Release: {tag}"
+                      }
+                  },
+                  {
+                      "type": "section",
+                      "fields": [
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Version:*\n`{tag}`",
+                          },
+                          {
+                              "type": "mrkdwn",
+                              "text": f"*Triggered by:*\n{triggered_by}",
+                          },
+                      ],
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": f"*Release:*\n{release_name}",
+                      },
+                  },
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": (
+                              f"*Release notes:*\n"
+                              f"{body or '_No release notes provided._'}"
+                          ),
+                      },
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View GitHub Release",
+                              },
+                              "url": release_url,
+                          }
+                      ],
+                  },
+              ],
+          }
+
+          with open("/tmp/slack-payload.json", "w") as f:
+              json.dump(payload, f)
+          PY
+
+      - name: Send release notification to Slack
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          webhook: ${{ secrets.SLACK_RELEASE_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload-file-path: /tmp/slack-payload.json

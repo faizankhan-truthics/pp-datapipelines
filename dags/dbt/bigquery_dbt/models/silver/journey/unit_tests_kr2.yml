@@ -1,0 +1,166 @@
+version: 2
+
+# KR2 rules (seeds/seed_kr2_channel_rules.csv): one touch per rule and per edge case of the spec.
+# The CASE is compiled from the loaded seed, so this tests the rules as they are; the seed rows
+# given here only feed the decision / channel join.
+unit_tests:
+  - name: test_kr2_touch_classification
+    model: int_user_touch_classified
+    given:
+      - input: ref('int_user_touch_candidates')
+        format: csv
+        rows: |
+          product,user_key,touch_system,touch_id,src,med,campaign_norm,ad_network,referrer_class,is_malformed_label,has_google_click,has_ms_click,has_meta_click,has_tiktok_click,n_click_platforms,click_platform,source_platform
+          infochecker,u,ga4,google_cpc_g,google,cpc,,g,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,google_cpc_x,google,cpc,,x,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,google_cpc_dsc,google,cpc,,dsc,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,google_cpc_no_network,google,cpc,,,,false,false,false,false,false,0,,google
+          infochecker,u,ga4,google_cpc_gm,google,cpc,,gm,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,google_display_d,google,display,,d,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,google_display_ytis,google,display,,ytis,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,bing_cpc_o,bing,cpc,,o,,false,false,true,false,false,1,microsoft,microsoft
+          infochecker,u,ga4,bing_cpc_a,bing,cpc,,a,,false,false,true,false,false,1,microsoft,microsoft
+          infochecker,u,ga4,facebook_cpc,facebook,cpc,,,,false,false,false,true,false,1,meta,meta
+          infochecker,u,ga4,tiktok_paid,tiktok,paid,,,,false,false,false,false,true,1,tiktok,tiktok
+          infochecker,u,ga4,google_no_medium_gclid_x,google,,,x,,false,true,false,false,false,1,google,google
+          infochecker,u,ga4,malformed_with_gclid,,,,g,,true,true,false,false,false,1,google,
+          infochecker,u,ga4,gclid_and_fbclid,google,cpc,,g,,false,true,false,true,false,2,google,google
+          infochecker,u,ga4,malformed_with_msclkid,,,,,,true,false,true,false,false,1,microsoft,
+          reversly,u,amplitude,msclkid_no_source_o,,,,o,,false,false,true,false,false,1,microsoft,
+          reversly,u,amplitude,msclkid_no_source_a,,,,a,,false,false,true,false,false,1,microsoft,
+          reversly,u,amplitude,msclkid_no_source_no_network,,,,,,false,false,true,false,false,1,microsoft,
+          infochecker,u,ga4,own_site_return,,,,,own,false,false,false,false,false,0,,
+          infochecker,u,ga4,stripe_return,,,,,payment,false,false,false,false,false,0,,
+          infochecker,u,ga4,oauth_return,,,,,oauth,false,false,false,false,false,0,,
+          infochecker,u,payment,stripe_return_with_cpc,google,cpc,,g,payment,false,false,false,false,false,0,,google
+          infochecker,u,ga4,google_malformed_medium_gclid,google,,,g,,true,true,false,false,false,1,google,google
+          infochecker,u,ga4,campaign_only,,,spring_promo,,,false,false,false,false,false,0,,
+          infochecker,u,ga4,google_aff_medium_gclid,google,aff,,g,,false,true,false,false,false,1,google,google
+          files_editor,u,anytrack,fe_redirect,file-editor,referral,,,,false,false,false,false,false,0,,
+          oqg,u,anytrack,qr_scan,scan,,,,,false,false,false,false,false,0,,
+          iqcenter,u,anytrack,scanned_page,scanned,,,,external,false,false,false,false,false,0,,
+          infochecker,u,ga4,blank_session,,,,,,false,false,false,false,false,0,,
+          infochecker,u,anytrack,anytrack_direct,direct,,,,,false,false,false,false,false,0,,
+          infochecker,u,anytrack,direct_with_referrer,direct,,,,external,false,false,false,false,false,0,,
+          infochecker,u,ga4,google_organic,google,organic,,,search,false,false,false,false,false,0,,google
+          infochecker,u,anytrack,google_search_referrer,google,,,,search,false,false,false,false,false,0,,google
+          infochecker,u,anytrack,google_no_referrer,google,,,,,false,false,false,false,false,0,,google
+          infochecker,u,anytrack,google_app,com.google.android.googlequicksearchbox,,,,,false,false,false,false,false,0,,
+          infochecker,u,ga4,facebook_social,facebook,social,,,social,false,false,false,false,false,0,,meta
+          infochecker,u,anytrack,facebook_social_referrer,facebook,,,,social,false,false,false,false,false,0,,meta
+          infochecker,u,anytrack,facebook_fbclid_only,facebook,,,,,false,false,false,true,false,1,meta,meta
+          infochecker,u,anytrack,ig_instagram,ig,,,,instagram,false,false,false,false,false,0,,meta
+          infochecker,u,anytrack,ig_com_br,ig,,,,ig_com_br,false,false,false,false,false,0,,meta
+          infochecker,u,anytrack,ig_unknown,ig,,,,,false,false,false,false,false,0,,meta
+          infochecker,u,ga4,email_campaign,newsletter,email,spring_promo,,,false,false,false,false,false,0,,
+          infochecker,u,anytrack,email_no_campaign,,email,,,,false,false,false,false,false,0,,
+          infochecker,u,anytrack,affiliate_medium,partnerx,affiliate,,,,false,false,false,false,false,0,,
+          infochecker,u,ga4,partner_medium_referrer,partnerx,partner,,,external,false,false,false,false,false,0,,
+          infochecker,u,anytrack,doubleclick,doubleclick,,,,intermediary,false,false,false,false,false,0,,
+          infochecker,u,anytrack,publisher_referral,globo,,,,external,false,false,false,false,false,0,,
+          infochecker,u,anytrack,webmail_referrer,,,,,webmail,false,false,false,false,false,0,,
+          infochecker,u,ga4,malformed_no_evidence,,,,,,true,false,false,false,false,0,,
+          infochecker,u,ga4,odd_label,adqcfy,ilz,,,,false,false,false,false,false,0,,
+      # read at compile time only (the CASE comes from the loaded seed)
+      - input: ref('seed_kr2_domain_lists')
+        rows:
+          - {list_name: search_engine, match_type: source, value: google}
+      - input: ref('seed_kr2_channel_rules')
+        format: csv
+        rows: |
+          rule_id,decision,channel_group,fallback_channel_group,reason
+          E02,ignore,,,
+          E03,ignore,,,
+          E04,ignore,,,
+          E05,skip_flag,,referral,scanned
+          Q01,skip_flag,,paid_other,conflict
+          Q02,skip_flag,,paid_other,odd label with click
+          P01,assign,paid_search,,
+          P02,assign,paid_cross_network,,
+          P03,assign,paid_other,,
+          P04,assign,paid_other,,
+          P05,assign,paid_other,,
+          P06,assign,paid_display,,
+          P07,assign,paid_other,,
+          P11,assign,paid_search,,
+          P12,assign,paid_audience,,
+          P15,assign,paid_social,,
+          P16,assign,paid_social,,
+          P17,assign,paid_search,,
+          P18,assign,paid_cross_network,,
+          P21,assign,paid_search,,
+          P22,assign,paid_audience,,
+          P23,assign,paid_other,,
+          N01,assign,organic,,
+          N01B,assign,organic,,
+          N02,skip_flag,,organic,search name only
+          N03,skip_flag,,organic,google app
+          N04,assign,social_unspecified,,
+          N04B,assign,social_unspecified,,
+          N05,skip_flag,,social_unspecified,social not confirmed
+          N06,assign,social_unspecified,,
+          N07,assign,referral,,
+          N08,skip_flag,,social_unspecified,ig unknown
+          N09,assign,email,,
+          N10,skip_flag,,email,email not proven
+          N11,assign,affiliate,,
+          N12,assign,direct,,
+          N13,skip_flag,,direct,direct with evidence
+          N14,skip_flag,,paid_other,intermediary
+          N15,assign,referral,,
+          N16,skip_flag,,,missing
+          N17,skip_flag,,other,no rule
+    expect:
+      format: csv
+      rows: |
+        touch_id,rule_id,decision,channel_group,fallback_channel_group,is_source_recovered
+        google_cpc_g,P01,assign,paid_search,,false
+        google_cpc_x,P02,assign,paid_cross_network,,false
+        google_cpc_dsc,P03,assign,paid_other,,false
+        google_cpc_no_network,P04,assign,paid_other,,false
+        google_cpc_gm,P05,assign,paid_other,,false
+        google_display_d,P06,assign,paid_display,,false
+        google_display_ytis,P07,assign,paid_other,,false
+        bing_cpc_o,P11,assign,paid_search,,false
+        bing_cpc_a,P12,assign,paid_audience,,false
+        facebook_cpc,P15,assign,paid_social,,false
+        tiktok_paid,P16,assign,paid_social,,false
+        google_no_medium_gclid_x,P18,assign,paid_cross_network,,false
+        malformed_with_gclid,P17,assign,paid_search,,true
+        gclid_and_fbclid,Q01,skip_flag,,paid_other,false
+        malformed_with_msclkid,Q02,skip_flag,,paid_other,false
+        msclkid_no_source_o,P21,assign,paid_search,,true
+        msclkid_no_source_a,P22,assign,paid_audience,,true
+        msclkid_no_source_no_network,P23,assign,paid_other,,true
+        own_site_return,E02,ignore,,,false
+        stripe_return,E02,ignore,,,false
+        oauth_return,E02,ignore,,,false
+        stripe_return_with_cpc,P01,assign,paid_search,,false
+        google_malformed_medium_gclid,P17,assign,paid_search,,false
+        campaign_only,N16,skip_flag,,,false
+        google_aff_medium_gclid,N11,assign,affiliate,,false
+        fe_redirect,E03,ignore,,,false
+        qr_scan,E04,ignore,,,false
+        scanned_page,E05,skip_flag,,referral,false
+        blank_session,N12,assign,direct,,false
+        anytrack_direct,N12,assign,direct,,false
+        direct_with_referrer,N13,skip_flag,,direct,false
+        google_organic,N01,assign,organic,,false
+        google_search_referrer,N01B,assign,organic,,false
+        google_no_referrer,N02,skip_flag,,organic,false
+        google_app,N03,skip_flag,,organic,false
+        facebook_social,N04,assign,social_unspecified,,false
+        facebook_social_referrer,N04B,assign,social_unspecified,,false
+        facebook_fbclid_only,N05,skip_flag,,social_unspecified,false
+        ig_instagram,N06,assign,social_unspecified,,false
+        ig_com_br,N07,assign,referral,,false
+        ig_unknown,N08,skip_flag,,social_unspecified,false
+        email_campaign,N09,assign,email,,false
+        email_no_campaign,N10,skip_flag,,email,false
+        affiliate_medium,N11,assign,affiliate,,false
+        partner_medium_referrer,N11,assign,affiliate,,false
+        doubleclick,N14,skip_flag,,paid_other,false
+        publisher_referral,N15,assign,referral,,false
+        webmail_referrer,N16,skip_flag,,,false
+        malformed_no_evidence,N16,skip_flag,,,false
+        odd_label,N17,skip_flag,,other,false

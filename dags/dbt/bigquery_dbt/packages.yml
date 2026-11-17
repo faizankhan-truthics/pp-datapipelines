@@ -1,0 +1,13 @@
+# dbt package dependencies. Install with `dbt deps` (run before `dbt run`/`dbt docs generate`).
+#
+# IMPORTANT compatibility note:
+#   The Elementary dbt package version and the `edr` CLI version MUST match on their
+#   first two version numbers (e.g. package 0.25.x  <->  edr 0.25.x). See requirements-local.txt.
+#   Elementary 0.25.x requires dbt-core/dbt-bigquery >=1.8,<2.0 (satisfied by 1.11.3).
+#   After editing versions, run `dbt deps` and confirm it resolves without errors.
+packages:
+  - package: elementary-data/elementary
+    version: [">=0.25.0", "<0.26.0"]
+
+  - package: dbt-labs/dbt_utils
+    version: [">=1.1.0", "<2.0.0"]

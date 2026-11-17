@@ -1,0 +1,271 @@
+version: 2
+
+models:
+
+  - name: dim_user
+    description: >
+      Centralized user dimension. One row per resolved identity (see
+      int_identity_user_map for how a user_key is derived — email match only, no
+      fuzzy matching). Identity itself is Solidgate + Stripe only; Zendesk has no
+      subscription concept of its own, so it is folded in as ticket-volume
+      enrichment (matched separately, on email) rather than as an identity source.
+      Users with no email on file anywhere cannot be matched and are excluded
+      (not_null user_key is enforced upstream in int_identity_user_map).
+      Also the customer-level ad attribution mart: carries first-touch campaign
+      attribution (int_customer_attribution) alongside current MRR and lifetime revenue
+      (int_customer_revenue), so campaign → user → LTV/MRR can be queried directly.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - user_key
+
+    columns:
+      - name: user_key
+        description: Deterministic identity key (md5 hash of lower-cased/trimmed email). See int_identity_user_map.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: email
+        description: Canonical (lower-cased, trimmed) email for this user.
+        data_tests:
+          - not_null
+
+      - name: is_solidgate_customer
+        description: Whether this user has at least one Solidgate customer record.
+        data_tests:
+          - not_null
+
+      - name: is_stripe_customer
+        description: Whether this user has at least one Stripe customer record.
+        data_tests:
+          - not_null
+
+      - name: source_accounts
+        description: Distinct processing accounts (Solidgate _elt_account_name / Stripe _elt_stripe_account_id) this user has a record in, across both systems.
+
+      - name: source_customer_records
+        description: >
+          Count of distinct (source_system, source_account, source_customer_id) rows
+          behind this user_key. 1 is the common case. Higher counts mean either the
+          same person paying through multiple accounts/products, or — indistinguishable
+          from here — a shared email across different people. Treat high values as a
+          data-quality signal to investigate, not as guaranteed cross-sell.
+        data_tests:
+          - not_null
+
+      - name: first_revenue_date
+        description: Earliest date this user generated recurring revenue, across whichever source(s) they appear in.
+
+      - name: attribution_status
+        description: >
+          First-touch attribution status: that of whichever of this user's customer records
+          (see int_customer_attribution) started paying first, preferring an attributed
+          record on a tie. `unattributed` also covers users with no record in the attribution
+          population (customers that never carried MRR).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - attributed
+                  - unattributed
+
+      - name: acquisition_source_system
+        description: "`solidgate` or `stripe` — which source record the first-touch attribution was taken from."
+
+      - name: acquisition_source_account
+        description: Processing account of the source record the first-touch attribution was taken from.
+
+      - name: source
+        description: "First-touch traffic source, e.g. google. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: medium
+        description: "First-touch medium, e.g. cpc. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: campaign
+        description: "First-touch campaign (utm_campaign). `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: campaign_id
+        description: First-touch Google Ads campaign id, for joining to spend.
+
+      - name: campaign_name
+        description: Google Ads campaign name for campaign_id, latest on file.
+
+      - name: gclid
+        description: First-touch Google Ads click id.
+
+      - name: attributed_from_date
+        description: Date of the payment that carried the first-touch attribution.
+
+      - name: attributed_source_customer_records
+        description: How many of this user's customer records are attributed. Compare to source_customer_records.
+        data_tests:
+          - not_null
+
+      - name: current_mrr_usd
+        description: MRR in USD across all this user's customer records, as of each source's latest snapshot. 0 if none active.
+        data_tests:
+          - not_null
+
+      - name: lifetime_gross_revenue_usd
+        description: Lifetime successful payments across all this user's customer records, USD. See int_customer_revenue.
+        data_tests:
+          - not_null
+
+      - name: lifetime_refunded_usd
+        description: Lifetime refunds across all this user's customer records, USD.
+        data_tests:
+          - not_null
+
+      - name: lifetime_revenue_usd
+        description: >
+          LTV to date: lifetime_gross_revenue_usd − lifetime_refunded_usd, summed across this
+          user's customer records that ever carried MRR. See int_customer_revenue.
+        data_tests:
+          - not_null
+
+      - name: support_ticket_count
+        description: Count of distinct Zendesk tickets this email has filed, of any kind. 0 if none (not null — Zendesk match is a left join). Matched on email, independent of the Solidgate/Stripe identity resolution.
+        data_tests:
+          - not_null
+
+      - name: refund_ticket_count
+        description: Of support_ticket_count, how many were tagged as refund-request intent (see int_zendesk_refund_tickets). 0 if none.
+        data_tests:
+          - not_null
+
+  - name: fct_subscription
+    description: >
+      Centralized subscription fact. One row per subscription per source_system,
+      current state only (mrr_local/mrr_usd reflect each source's most recent
+      snapshot_date — see mrr_as_of_date — not necessarily "today" for both sources
+      at once). Grain: source_system x subscription_id. Rows with no matched email
+      still appear here with a null user_key — do not inner-join to dim_user if you
+      need subscriptions from unmatched customers.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - source_system
+              - subscription_id
+
+    columns:
+      - name: user_key
+        description: Resolved identity (see dim_user). Null if the subscription's customer record had no matchable email.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_user')
+                field: user_key
+
+      - name: source_system
+        description: "`solidgate` or `stripe`."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - solidgate
+                  - stripe
+
+      - name: source_account
+        description: Processing account — Solidgate `_elt_account_name` or Stripe `_elt_stripe_account_id`.
+        data_tests:
+          - not_null
+
+      - name: source_customer_id
+        description: Customer id as known to the source system, scoped to source_account.
+
+      - name: subscription_id
+        description: Subscription id as known to the source system.
+        data_tests:
+          - not_null
+
+      - name: status
+        description: >
+          Subscription status, in the source system's own vocabulary — Solidgate and
+          Stripe do not share a status taxonomy (e.g. Solidgate's `redemption` has no
+          direct Stripe equivalent). Do not compare status values across source_system
+          without a mapping.
+
+      - name: plan_name
+        description: >
+          Product/plan name. Solidgate: the subscription's product name. Stripe: comma-
+          joined names of every recurring item's product, since one Stripe subscription
+          can carry several. Not a normalized cross-source tier — see model-level note.
+
+      - name: billing_cycle
+        description: "Normalized cadence label (weekly, biweekly, monthly, quarterly, semiannual, yearly, or other/prorated) — directly comparable across source_system."
+
+      - name: currency
+        description: Three-letter ISO currency code the subscription bills in.
+
+      - name: mrr_local
+        description: Monthly recurring revenue in the subscription's billing currency, as of mrr_as_of_date.
+
+      - name: mrr_usd
+        description: >
+          mrr_local converted to USD using the exchange rate as of mrr_as_of_date,
+          falling back to the most recent rate on file for that currency. Null if no
+          rate exists for that currency at all.
+
+      - name: mrr_as_of_date
+        description: The snapshot_date this row's mrr figures were taken from — the most recent date the subscription's source model has data for. Compare this across rows before comparing mrr values; Solidgate and Stripe are not guaranteed to be current as of the same date.
+        data_tests:
+          - not_null
+
+      - name: start_date
+        description: Date the subscription started.
+
+      - name: current_period_end_date
+        description: >
+          Solidgate: next_charge_date from the subscription lifecycle. Stripe:
+          current_period_end_date. Both represent "when does the current billing
+          period end," worded differently per source.
+
+      - name: cancelled_date
+        description: Date the subscription was actually cancelled, if any. Null for active subscriptions.
+
+      - name: attribution_status
+        description: >
+          The subscription's customer's attribution status (see int_customer_attribution).
+          Every subscription inherits its customer's acquisition channel. `unattributed` also
+          covers customers outside the attribution population.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - attributed
+                  - unattributed
+
+      - name: source
+        description: "Customer's acquisition source. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: medium
+        description: "Customer's acquisition medium. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: campaign
+        description: "Customer's acquisition campaign (utm_campaign). `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+
+      - name: campaign_id
+        description: Customer's acquisition Google Ads campaign id, for joining to spend.
+
+      - name: gclid
+        description: Customer's acquisition Google Ads click id.

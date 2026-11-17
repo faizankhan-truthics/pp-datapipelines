@@ -1,0 +1,66 @@
+version: 2
+
+seeds:
+  - name: seed_product_registry
+    description: >
+      One row per product in the user journey mart (docs/plans/user_journey_mart.md, section 5).
+      Says which sources a product has and how its events map to journey stages. Adding a product
+      means adding a row here, its payment accounts in seed_product_payment_accounts, and (if it
+      has Amplitude) its table block in models/bronze/amplitude.yml -- no model changes. Models
+      read it through the registry_* macros (macros/registry.sql).
+
+      Rule columns (signup_events, activation_rule, trial_events) use a small fixed grammar:
+      `source:event_name[prop=value]`, several rules separated by `;`, e.g.
+      `amplitude:signup_complete;ga4:signup`; sources are amplitude, ga4 and anytrack (event_name
+      of bronze anytrack_<product>_events). registry_event_filter() turns them into SQL.
+
+      No date columns on purpose: each source's start of history is derived from the data.
+    config:
+      tags: ["journey", "seed", "on-full-refresh"]
+
+    columns:
+      - name: product
+        description: "Product key used across the journey mart (lowercase)."
+        data_tests:
+          - unique
+          - not_null
+      - name: is_in_scope
+        description: "Only in-scope products are built. Lets a product be registered before its data is ready."
+        data_tests:
+          - not_null
+      - name: ga4_property_name
+        description: >
+          Join key to int_ga4_sessions / int_ga4_transactions (the lowercased suffix of the
+          property's GA4_PROPERTY_ID_<NAME> env var). Empty when the product has no GA4 export:
+          the GA4 parts of the mart are then skipped for it.
+      - name: amplitude_source_table
+        description: >
+          Table name inside source('amplitude', ...) in models/bronze/amplitude.yml. Empty when the
+          product has no Amplitude project: its users are then built from AnyTrack signups and
+          payers only.
+      - name: anytrack_product
+        description: >
+          Product name(s) in bronze anytrack_<product>_events, `;`-separated when one product has
+          several AnyTrack tables (files_editor;file_editor).
+      - name: primary_visitor_source
+        description: >
+          The system a product's users come from: amplitude (app users and anonymous visitors), or
+          anytrack (signups and payers only; the product has no Amplitude project). Informational.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['amplitude', 'anytrack']
+      - name: site_domains
+        description: "The product's own domains (`;`-separated), not counted as referrers in first-touch."
+      - name: signup_events
+        description: "Rules for the signup stage (grammar above)."
+      - name: activation_rule
+        description: "Rule for the activation stage (grammar above). Default pending plan Q2."
+      - name: trial_events
+        description: "Rules for the trial stage (grammar above)."
+      - name: ga4_checkout_events
+        description: >
+          `;`-separated GA4 event names whose transaction_id is a payment id: a Solidgate order_id
+          (E7+) or a Stripe payment_intent (E7s).
+      - name: dormancy_days
+        description: "Days without activity after which a registered user counts as dormant."

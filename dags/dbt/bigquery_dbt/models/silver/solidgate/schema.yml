@@ -1,0 +1,1411 @@
+version: 2
+
+models:
+
+  - name: int_solidgate_card_orders
+    description: >
+      Incremental model containing Solidgate card orders enriched with USD
+      exchange rates.
+
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - order_id
+
+    columns:
+
+      - name: order_id
+        description: Unique identifier of the order.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: status
+        description: Current order status.
+        data_tests:
+          - not_null
+
+      - name: type
+        description: Order transaction type.
+
+      - name: order_amount_local
+        description: Original order amount in the local currency.
+        data_tests:
+          - not_null
+
+      - name: order_currency
+        description: ISO 4217 currency code of the order.
+        data_tests:
+          - not_null
+
+      - name: settled_amount
+        description: Amount settled for the order.
+
+      - name: settled_currency
+        description: Currency of the settled amount.
+
+      - name: refunded_amount
+        description: Amount refunded.
+
+      - name: refunded_currency
+        description: Currency of the refunded amount.
+
+      - name: refund
+        description: Indicates whether a refund exists.
+
+      - name: processing_amount
+        description: Processing amount.
+
+      - name: processing_currency
+        description: Currency of the processing amount.
+
+      - name: customer_account_id
+        description: Customer account identifier.
+
+      - name: fraudulent
+        description: Fraud flag.
+
+      - name: customer_email_key
+        description: >
+          md5 of the order's lower-cased, trimmed customer email (the email user_key of
+          int_identity_user_map); the address itself is not kept. Null on rows loaded before the
+          column was added, until the model is fully refreshed.
+
+      - name: created_at
+        description: >
+          Timestamp the order was created. Null on rows loaded before the column was added, until
+          the model is fully refreshed.
+
+      - name: created_date
+        description: Date the order was created.
+        data_tests:
+          - not_null
+
+      - name: updated_at
+        description: Timestamp when the order was last updated.
+
+      - name: settled_at
+        description: Timestamp of the first successful settle transaction on the order (null if never settled).
+
+      - name: settlement_date
+        description: Date of the first successful settle transaction on the order (null if never settled).
+
+      - name: refunded_at
+        description: Timestamp of the first successful refund transaction on the order (null if never refunded).
+
+      - name: refund_date
+        description: Date of the first successful refund transaction on the order (null if never refunded).
+
+      - name: subscription_id
+        description: Associated subscription identifier.
+
+      - name: product_name
+        description: Product associated with the order.
+
+      - name: payment_type
+        description: Payment method used.
+
+      - name: geo_country
+        description: >
+          Country associated with the order, derived by Solidgate from the
+          customer's IP address at time of payment (not billing address or
+          card-issuing country).
+
+      - name: _elt_account_name
+        description: ELT account name.
+        data_tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: ELT update timestamp.
+        data_tests:
+          - not_null
+
+      - name: order_amount_usd
+        description: >
+          Order amount in USD major units (dollars), converted using the exchange rate for the order
+          creation date. Zero-decimal currencies are not divided.
+#        data_tests:
+#          - not_null
+
+      - name: psp_name
+        description: >
+          Payment service provider name, resolved from the order's merchant id (mid)
+          by joining the solidgate_mid_lookup bronze table in this model.
+
+
+  - name: int_solidgate_routing_info
+    description: >
+      Routing of Solidgate card orders, unnested from bronze solidgate_card_orders.routing.
+      One row per order, holding the final cascade step (the route that processed the order).
+      Orders without routing are not present.
+
+    columns:
+
+      - name: order_id
+        description: Unique identifier of the order. Joins to int_solidgate_card_orders.order_id.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: mid
+        description: >
+          Bank MID of the final routing cascade step (highest cascade_number in
+          routing.cascade_steps), i.e. the route that processed the order.
+
+      - name: mid_descriptor
+        description: MID descriptor of the final routing cascade step.
+
+      - name: route_id
+        description: Route ID of the final routing cascade step.
+
+      - name: segment_id
+        description: Segment ID of the final routing cascade step.
+
+      - name: cascade_number
+        description: Cascade number of the final routing step (1 = first attempt).
+
+      - name: connector_account_id
+        description: Connector account ID of the final routing cascade step.
+
+      - name: cascade_steps
+        description: Number of cascade steps the order went through.
+
+      - name: _elt_account_name
+        description: ELT account name.
+        data_tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: ELT update timestamp.
+        data_tests:
+          - not_null
+
+
+  - name: int_solidgate_chargebacks
+    description: >
+      Incremental model containing Solidgate chargebacks enriched with USD
+      currency conversion based on the chargeback creation date.
+
+    columns:
+
+      - name: order_id
+        description: Identifier of the associated card order.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: status
+        description: Current status of the chargeback.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - in_progress
+                  - document_sent
+                  - reversed
+                  - accepted
+                  - resolved
+                  - resolved_reversal
+                  - settle_ok
+                  - refunded
+                  - auth_ok
+
+      - name: type
+        description: Chargeback type.
+        data_tests:
+          - not_null
+
+      - name: amount_local
+        description: Chargeback amount in the original currency.
+        data_tests:
+          - not_null
+
+      - name: currency
+        description: ISO 4217 currency code.
+        data_tests:
+          - not_null
+
+      - name: amount_usd
+        description: >
+          Chargeback amount in USD major units (dollars), converted using the exchange rate for the
+          chargeback creation date.
+
+      - name: psp_name
+        description: >
+          Payment service provider name, resolved by joining order_id to
+          int_solidgate_card_orders.
+
+      - name: order_description
+        description: Description associated with the original order.
+
+      - name: customer_account_id
+        description: Identifier of the customer account.
+
+      - name: fraudulent
+        description: Indicates whether the order was flagged as fraudulent.
+
+      - name: created_date
+        description: Date the chargeback was created.
+        data_tests:
+          - not_null
+
+      - name: updated_at
+        description: Timestamp when the chargeback was last updated.
+
+      - name: _elt_account_name
+        description: Source ELT account name.
+        data_tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated by the ELT pipeline.
+        data_tests:
+          - not_null
+
+
+  - name: int_solidgate_fraud_alerts
+    description: >
+      Incremental model containing Solidgate fraud alerts. Includes Visa fraud
+      alerts used for VAMP reporting and fraud monitoring.
+
+    columns:
+
+      - name: fraud_alert_id
+        description: Unique identifier of the fraud alert.
+        data_tests:
+          - not_null
+          - unique
+
+      - name: created_date
+        description: Date the fraud alert was created.
+        data_tests:
+          - not_null
+
+      - name: updated_at
+        description: Timestamp when the fraud alert was last updated.
+
+      - name: order_id
+        description: Identifier of the associated card order.
+        data_tests:
+          - not_null
+
+      - name: fraud_amount_local
+        description: Fraud amount in the original transaction currency.
+        data_tests:
+          - not_null
+
+      - name: fraud_currency
+        description: ISO 4217 currency code of the fraud amount.
+        data_tests:
+          - not_null
+
+      - name: fraud_amount_usd
+        description: Fraud amount in USD major units (dollars). Solidgate sends it in cents.
+        data_tests:
+          - not_null
+
+      - name: fraud_type
+        description: Type of fraud alert.
+
+      - name: card_scheme
+        description: Card network associated with the fraud alert.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - VISA
+                  - MASTERCARD
+
+      - name: vamp_alerts
+        description: >
+          Indicates whether the fraud alert is a Visa alert and should be
+          considered for VAMP reporting.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - true
+                  - false
+                quote: false
+
+      - name: fraud_report_date
+        description: Date the fraud was reported.
+
+      - name: reason_code_description
+        description: Description of the fraud reason code.
+
+      - name: psp_name
+        description: >
+          Payment service provider name, resolved by joining order_id to
+          int_solidgate_card_orders.
+
+      - name: _elt_account_name
+        description: Source ELT account name.
+        data_tests:
+          - not_null
+
+      - name: _elt_endpoint
+        description: ELT endpoint from which the record was ingested.
+        data_tests:
+          - not_null
+
+      - name: _elt_insert_timestamp
+        description: Timestamp when the record was inserted into the ELT pipeline.
+        data_tests:
+          - not_null
+
+      - name: _elt_update_timestamp
+        description: Timestamp when the record was last updated in the ELT pipeline.
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_customer_attribution
+    description: >
+      Where each customer came from, taken from the earliest payment of theirs that GA4 saw.
+      Renewals carry no GA4 event, so the customer is attributed once and every later payment
+      inherits it. Customers we cannot place are kept as `unattributed` so channel revenue
+      still adds up to total revenue. Grain: one row per customer per account.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - customer_account_id
+              - _elt_account_name
+    columns:
+      - name: customer_account_id
+        description: "The customer."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: source
+        description: "Where they came from, e.g. google. `unattributed` when nothing matched."
+        data_tests:
+          - not_null
+      - name: medium
+        description: "How they arrived, e.g. cpc or organic."
+      - name: campaign
+        description: "The campaign that brought them in, when one was tagged."
+      - name: campaign_id
+        description: "Google Ads campaign id, for joining to campaign spend."
+      - name: gclid
+        description: "Google Ads click id, when the purchase happened in the same session as the click."
+      - name: attributed_from_subscription_id
+        description: "The subscription whose payment carried the attribution."
+      - name: attributed_from_date
+        description: >
+          The day of that payment. Well after the customer's first day means we missed their
+          earlier payments and picked up a later one, so treat the attribution as weaker.
+      - name: attribution_status
+        description: "Whether we could place this customer at all."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['attributed', 'unattributed']
+
+  - name: int_solidgate_transactions
+    description: >
+      Solidgate orders across every account, payment side of the generalized GA4 stitch.
+      Sourced from the subscription invoice orders (not financial_entries) so each transaction
+      carries its subscription_id/invoice_id, which is what lets GA4 attribution reach the MRR
+      models later. Every order attempt counts, successful or not.
+      Grain: sg_date x _elt_account_name x transaction_id -- order_id is only unique within an
+      account's own namespace, not globally.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - sg_date
+              - _elt_account_name
+              - transaction_id
+    columns:
+      - name: sg_date
+        description: "The day the payment was attempted (order_created_at), in UTC."
+        data_tests:
+          - not_null
+      - name: transaction_id
+        description: "Solidgate order id. The join key to GA4."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Solidgate account this order belongs to. Join key to seed_ga4_payment_account_map.account_key."
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: "Subscription this order belongs to. Joins through to the MRR models."
+        data_tests:
+          - not_null
+      - name: invoice_id
+        description: "Invoice this order belongs to."
+      - name: order_status
+        description: "Order attempt status (e.g. approved, declined) -- every attempt is included, not just successful ones."
+      - name: order_amount_usd
+        description: "Order amount in USD, carried through from int_solidgate_card_orders. Present regardless of order_status -- filter to successful orders before summing as revenue."
+
+
+  - name: int_solidgate_subscription_customers
+    description: "Customer object shredded out of the subscriptions payload. Grain: subscription_id."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: customer_account_id
+        description: "Customer key for MRR aggregation."
+      - name: customer_email
+        description: "Customer email."
+      - name: _elt_account_name
+        description: "Solidgate account the record came from."
+        data_tests:
+          - not_null
+      - name: _elt_update_timestamp
+        description: "ELT merge timestamp; incremental key."
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_subscription_products
+    description: "Product (plan) object shredded out of the subscriptions payload. Amounts in cents. Grain: subscription_id."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: product_id
+        description: "Solidgate product (plan) id."
+      - name: product_name
+        description: "Plan name."
+      - name: payment_action
+        description: "auth_settle / auth_void etc."
+      - name: product_amount_cents
+        description: "Plan price in minor units. 4995 = 49.95."
+      - name: currency
+        description: "Three-letter ISO code, upper-cased."
+      - name: product_trial
+        description: "Whether the plan has a trial; used to exclude paid-trial terms from MRR."
+      - name: trial_period_minutes
+        description: "Trial length in minutes (10080 = 7 days)."
+      - name: _elt_account_name
+        description: "Solidgate account the record came from."
+        data_tests:
+          - not_null
+      - name: _elt_update_timestamp
+        description: "ELT merge timestamp; incremental key."
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_subscription_invoices
+    description: >
+      Invoices map shredded out of the subscriptions payload. Amounts in cents,
+      timestamps UTC. Grain: subscription_id x invoice_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - invoice_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: invoice_id
+        description: "Key of the invoice inside the `invoices` JSON object."
+        data_tests:
+          - not_null
+      - name: invoice_status
+        description: "success / fail. Only `success` carries revenue."
+      - name: invoice_amount_cents
+        description: "Invoice amount in minor units."
+      - name: subscription_term_number
+        description: "Billing term index. Term 0 of a trial plan is a trial charge."
+      - name: billing_period_started_at
+        description: "MRR attribution window start (inclusive)."
+      - name: billing_period_ended_at
+        description: "MRR attribution window end (exclusive)."
+      - name: invoice_created_at
+        description: "When the invoice was created."
+      - name: invoice_updated_at
+        description: "When the invoice was last updated."
+      - name: product_id
+        description: >
+          Product active when this invoice was billed, rolled up from
+          int_solidgate_subscription_invoice_orders (the settled order if one
+          exists, else the latest attempt). Null for orders paid via APM (not
+          yet modeled) or with no matching card order.
+      - name: product_name
+        description: "Product/plan name active when this invoice was billed. See product_id."
+      - name: product_type
+        description: "Product type active when this invoice was billed. See product_id."
+      - name: _elt_account_name
+        description: "Solidgate account the record came from."
+        data_tests:
+          - not_null
+      - name: _elt_update_timestamp
+        description: "ELT merge timestamp; incremental key."
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_subscription_invoice_orders
+    description: >
+      Orders (payment attempts) nested inside each invoice. Kept separate from the
+      invoice model because retries live at this grain and would double count anything
+      aggregated per invoice. Grain: subscription_id x invoice_id x order_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - invoice_id
+              - order_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: invoice_id
+        description: "Parent invoice id."
+        data_tests:
+          - not_null
+      - name: order_id
+        description: "Key of the order inside the invoice's `orders` object; `ord_*` joins to GA4."
+        data_tests:
+          - not_null
+      - name: order_status
+        description: "settle_ok / auth_failed etc."
+      - name: order_operation
+        description: "pay / settle."
+      - name: order_amount_cents
+        description: "Order amount in minor units."
+      - name: order_retry_attempt
+        description: "Retry index; 0 is the first attempt."
+      - name: order_created_at
+        description: "When the order was created."
+      - name: order_processed_at
+        description: "When the order settled. Null while unsettled."
+      - name: payment_details_invoice_id
+        description: "Provider-side invoice id from payment_details."
+      - name: payment_details_payer_email
+        description: "Payer email from payment_details."
+      - name: psp_name
+        description: >
+          Payment service provider name, resolved by joining order_id to
+          int_solidgate_card_orders.merchant_id.
+      - name: product_id
+        description: >
+          Product active at the time this order was billed, resolved by joining
+          order_id to int_solidgate_card_orders. Null for orders paid via APM
+          (not yet modeled) or with no matching card order.
+      - name: product_name
+        description: "Product/plan name active when this order was billed. See product_id."
+      - name: product_type
+        description: "Product type active when this order was billed. See product_id."
+      - name: _elt_account_name
+        description: "Solidgate account the record came from."
+        data_tests:
+          - not_null
+      - name: _elt_update_timestamp
+        description: "ELT merge timestamp; incremental key."
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_mrr_eligible_invoices
+    description: >
+      Invoices that count as recurring revenue, normalized to a monthly rate.
+      Excludes failed, zero-value and paid-trial-term invoices.
+      Grain: subscription_id x invoice_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - invoice_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: customer_account_id
+        description: "Empty when Solidgate sent no customer details. Those rows still count towards account totals."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: currency
+        description: "Plan currency; MRR is summed per currency."
+      - name: billing_cycle
+        description: "weekly / biweekly / monthly / quarterly / semiannual / yearly, or `prorated` when unmapped."
+      - name: months_in_period
+        description: "Months covered by the invoice. Never null — a null divisor would drop the subscription from every sum."
+        data_tests:
+          - not_null
+      - name: mrr_local
+        description: "(amount / minor_unit_divisor) / months_in_period, in the plan's currency."
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_mrr_local_subscription_daily
+    description: >
+      Daily MRR per subscription — the fact table behind every aggregate MRR figure.
+      A subscription contributes on a date when a successful invoice's billing window
+      covers it, using the half-open interval [start, end).
+      Grain: snapshot_date x subscription_id x _elt_account_name.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - subscription_id
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "Date the MRR value applies to."
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: currency
+        description: "Plan currency."
+        data_tests:
+          - not_null
+      - name: mrr_local
+        description: "Monthly rate contributed by this subscription on this date."
+        data_tests:
+          - not_null
+      - name: subscription_status_now
+        description: >
+          Where the subscription stands today, not on this date — we only ever hold the
+          current status, so a row from June carries whatever it is now. Used by churn to
+          tell a payment still being retried from a customer who has gone.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['active', 'redemption', 'cancelled', 'expired']
+
+  - name: int_solidgate_mrr_local_daily
+    description: >
+      Daily MRR in local currency per Solidgate account (product) and currency, with the
+      day-over-day change. Grain: snapshot_date x _elt_account_name x currency.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+              - currency
+    columns:
+      - name: snapshot_date
+        description: "Date the MRR value applies to."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Solidgate account — the product dimension."
+        data_tests:
+          - not_null
+      - name: currency
+        description: "Plan currency. Totals are only comparable within a currency."
+        data_tests:
+          - not_null
+      - name: mrr
+        description: "Total MRR in local currency."
+        data_tests:
+          - not_null
+      - name: mrr_change
+        description: "Change vs the previous day for the same account and currency."
+      - name: prorated_rows
+        description: "Subscriptions on an unmapped billing cycle; approximated, so watch this."
+
+  - name: int_solidgate_card_orders_transactions
+    description: "Solidgate card order transactions extracted from the transactions JSON array."
+    columns:
+      - name: order_id
+        description: "ID of the Solidgate card order associated with the transaction."
+
+      - name: transaction_authorization_type
+        description: "Authorization type of the transaction."
+
+      - name: transaction_id
+        description: "Unique identifier of the Solidgate transaction."
+        tests:
+          - not_null
+          - unique
+
+      - name: transaction_operation
+        description: "Operation performed by the transaction, such as authorization, capture, or refund."
+
+      - name: transaction_currency
+        description: "Currency associated with the transaction."
+
+      - name: transaction_refund_reason
+        description: "Reason provided for a transaction refund."
+
+      - name: transaction_refund_reason_code
+        description: "Code identifying the reason for a transaction refund."
+
+      - name: transaction_status
+        description: "Current status of the transaction."
+
+      - name: transaction_amount
+        description: "Transaction amount."
+
+      - name: transaction_card_brand
+        description: "Card brand associated with the transaction."
+
+      - name: transaction_created_at
+        description: "Timestamp when the transaction was created."
+
+      - name: transaction_updated_at
+        description: "Timestamp when the transaction was last updated."
+
+      - name: psp_name
+        description: "Payment service provider name, resolved from the parent card order's mid via the solidgate_mid_lookup bronze table."
+
+      - name: _elt_account_name
+        description: "Source account name from the ELT ingestion process."
+
+      - name: _elt_update_timestamp
+        description: "Timestamp when the source record was last updated by the ELT process."
+        tests:
+          - not_null
+
+
+  - name: int_solidgate_card_order_attempts
+    description: >
+      One row per card payment attempt: every auth, recurring-auth, apple-pay and google-pay
+      transaction in a Solidgate card order. Status, error code and card come from the transaction
+      itself (not the order), so cascaded orders keep one row per attempt with its own outcome.
+      Bucket attempts by attempt_ts / attempt_date (when the attempt was made), not by the order's
+      updated_at, which moves ~4 days later when the order settles. Grain: one row per
+      (_elt_account_name, transaction_id); order_id is only unique within an account.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - _elt_account_name
+              - transaction_id
+    columns:
+      - name: _elt_account_name
+        description: "Solidgate account the order belongs to."
+        data_tests:
+          - not_null
+      - name: order_id
+        description: "Solidgate card order ID (unique within an account)."
+        data_tests:
+          - not_null
+      - name: psp_order_id
+        description: "PSP order ID. Equals Stripe charge metadata.psp_order_id for Stripe-routed orders."
+      - name: provider_payment_id
+        description: "Provider payment ID. Equals the Stripe payment_intent for Stripe-routed orders."
+      - name: subscription_id
+        description: "Solidgate subscription the order belongs to, if any."
+      - name: product_id
+        description: "Solidgate product ID of the order."
+      - name: product_name
+        description: "Solidgate product name of the order."
+      - name: order_type
+        description: "Order type (auth, recurring-auth, apple-pay, google-pay)."
+      - name: payment_type
+        description: "Payment type of the order."
+      - name: transaction_id
+        description: "Solidgate transaction ID of the attempt."
+        data_tests:
+          - not_null
+      - name: operation
+        description: "Transaction operation."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['auth', 'recurring-auth', 'apple-pay', 'google-pay']
+      - name: is_recurring
+        description: "True for merchant-initiated renewals (recurring-auth); false for customer-initiated checkout payments."
+      - name: status
+        description: "Transaction status: success, fail or processing."
+      - name: is_approved
+        description: "True when the attempt succeeded."
+      - name: is_final
+        description: "True when the attempt has a final status (success or fail)."
+      - name: error_code
+        description: "Solidgate error code of this attempt (per transaction, not per order)."
+      - name: error_message
+        description: "Readable message for error_code, from solidgate_error_codes."
+      - name: error_next_step
+        description: "Recommended next step for error_code, from solidgate_error_codes."
+      - name: authorization_type
+        description: "Authorization type of the transaction."
+      - name: transaction_type
+        description: "Transaction type, e.g. token for stored-card charges."
+      - name: amount_minor
+        description: "Attempted amount in minor units of currency."
+      - name: currency
+        description: "Currency of the attempt."
+      - name: card_id
+        description: "Solidgate card ID: stable identifier of the stored card. Used to detect repeat attempts on the same card."
+      - name: card_bin
+        description: "Card BIN."
+      - name: card_brand
+        description: "Card brand."
+      - name: card_type
+        description: "Card type (DEBIT, CREDIT, ...)."
+      - name: card_country
+        description: "Card issuing country."
+      - name: card_bank
+        description: "Card issuing bank."
+      - name: attempt_ts
+        description: "When the attempt was made (transaction created_at, UTC)."
+        data_tests:
+          - not_null
+      - name: attempt_date
+        description: "Date of attempt_ts. Partition column."
+      - name: attempt_seq_in_order
+        description: "1 for the order's first attempt; higher values are cascade attempts within the same order."
+      - name: transaction_updated_ts
+        description: "When the transaction was last updated."
+      - name: mid
+        description: "Merchant ID of the order."
+      - name: psp_name
+        description: "PSP behind the MID, from solidgate_mid_lookup (e.g. Stripe, Netevia, Fake)."
+      - name: _elt_update_timestamp
+        description: "Timestamp when the source record was last updated by the ELT process."
+        data_tests:
+          - not_null
+
+
+  - name: int_solidgate_chargebacks_transactions
+    description: "Chargeback transactions extracted from Solidgate chargeback data and enriched with USD conversion rates."
+
+    columns:
+      - name: chargeback_order_id
+        description: "Solidgate order ID associated with the chargeback."
+
+      - name: psp_name
+        description: "Payment service provider name, resolved by joining chargeback_order_id to int_solidgate_card_orders."
+
+      - name: _elt_account_name
+        description: "Source account name from the ELT ingestion process."
+
+      - name: _elt_update_timestamp
+        description: "Timestamp when the source record was last updated by the ELT ingestion process."
+        tests:
+          - not_null
+
+      - name: chargeback_id
+        description: "Unique identifier of the chargeback."
+        tests:
+          - not_null
+          - unique
+
+      - name: chargeback_reason_code
+        description: "Code identifying the reason for the chargeback."
+
+      - name: chargeback_reason_description
+        description: "Description of the reason for the chargeback."
+
+      - name: chargeback_reason_group
+        description: "Group categorizing the chargeback reason."
+
+      - name: chargeback_type
+        description: "Type of chargeback."
+
+      - name: chargeback_status
+        description: "Current status of the chargeback."
+
+      - name: chargeback_amount
+        description: "Original chargeback amount in the transaction currency."
+
+      - name: chargeback_created_at
+        description: "Timestamp when the chargeback was created."
+
+      - name: chargeback_updated_at
+        description: "Timestamp when the chargeback was last updated."
+
+      - name: chargeback_currency
+        description: "Currency of the original chargeback amount."
+
+      - name: chargeback_dispute_date
+        description: "Date of the chargeback dispute, based on the issuer dispute date."
+
+      - name: chargeback_settlement_date
+        description: "Date when the chargeback was settled."
+
+      - name: vamp_include
+        description: "Indicates whether the chargeback should be included in VAMP calculations. Resolved and resolved_reversal chargebacks are excluded."
+
+      - name: chargeback_amount_usd
+        description: "Chargeback amount in USD major units (dollars), converted using the exchange rate for the dispute date."
+        tests:
+          - not_null
+
+  - name: int_solidgate_mrr_customer_daily
+    description: >
+      What each customer is worth per month, for every day, plus the first day they ever
+      paid us. Leaves out subscriptions with no customer details, so the total sits a
+      little under the account-level MRR marts.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - customer_account_id
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The day this figure applies to."
+        data_tests:
+          - not_null
+      - name: customer_account_id
+        description: "The customer."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: currency
+        description: "The currency the customer's plans are priced in."
+      - name: currencies
+        description: "How many different currencies the customer pays in. Almost always 1."
+      - name: mrr_local
+        description: "Monthly value in the customer's own currency."
+        data_tests:
+          - not_null
+      - name: fx_rate
+        description: >
+          The exchange rate used. We take the rate for that day, or the most recent one
+          before it if the day is missing. US dollars are left as they are.
+      - name: mrr_usd
+        description: "Monthly value in US dollars. Empty if we have no rate for the currency."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: has_missing_fx
+        description: "Flags a customer whose currency has no exchange rate."
+        data_tests:
+          - not_null
+      - name: missing_fx_currencies
+        description: "Which currency was missing a rate."
+      - name: active_subscriptions
+        description: "How many plans the customer is paying for that day."
+        data_tests:
+          - not_null
+      - name: subscriptions_live_now
+        description: >
+          How many of their plans are still live or still retrying a payment, as of the
+          last run rather than as of this date. Churn uses it to tell a lapse from a
+          customer who has actually gone.
+        data_tests:
+          - not_null
+      - name: first_revenue_date
+        description: >
+          The first day this customer ever paid us. Taken from their invoices, so it holds
+          even if their history starts before the period we are reporting on.
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_mrr_movements_daily
+    description: >
+      Compares each customer's monthly value against the day before and labels what changed.
+      New business, expansion and contraction are identified; everything else shows as `other`.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - customer_account_id
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The day the change happened."
+        data_tests:
+          - not_null
+      - name: customer_account_id
+        description: "The customer."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: prev_mrr_local
+        description: "What they were worth the day before, in their own currency."
+      - name: mrr_local
+        description: "What they are worth today, in their own currency."
+      - name: movement_mrr_local
+        description: "The difference between the two."
+      - name: mrr_usd
+        description: "What they are worth today, in US dollars."
+      - name: movement_mrr_usd
+        description: "The difference, in US dollars."
+      - name: movement_type
+        description: >
+          `new_business` on a customer's first day, `expansion` when they start paying more,
+          `contraction` when they pay less but not nothing. Only compares against the day
+          before — a customer returning after a break is handled by the churn and
+          reactivation models, not here. Everything else is `other`.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['new_business', 'expansion', 'contraction', 'other']
+      - name: contraction_reason
+        description: "Why they pay less: `cancellation` if they dropped a plan, `downgrade_or_discount` if they kept the same number. Null unless contraction."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['cancellation', 'downgrade_or_discount']
+      - name: first_revenue_date
+        description: "The first day this customer ever paid us."
+      - name: has_missing_fx
+        description: "Flags a customer whose currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currency was missing a rate."
+
+  - name: int_solidgate_new_business_daily
+    description: >
+      How many customers paid us for the first time each day, and what they are worth per
+      month. Each customer counts once, ever.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The day the customers arrived."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: new_customers
+        description: "Customers paying us for the first time."
+        data_tests:
+          - not_null
+      - name: new_subscriptions
+        description: "How many plans they started with."
+      - name: new_business_mrr_local
+        description: "Their combined monthly value, mixing currencies. Rough guide only."
+      - name: new_business_mrr_usd
+        description: "Their combined monthly value in US dollars. This is the number to use."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: >
+          New customers we could not convert because their currency has no exchange rate.
+          They still count as customers, but their value is missing from the dollar total.
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_solidgate_expansion_daily
+    description: >
+      Existing customers who started paying more, and by how much. Records the increase,
+      not the customer's new total.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The day the increase happened."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: expansion_customers
+        description: "Customers paying more than the day before."
+        data_tests:
+          - not_null
+      - name: expansion_mrr_local
+        description: "How much more, in their own currency. Mixes currencies — rough guide only."
+      - name: expansion_mrr_usd
+        description: "How much more, in US dollars. This is the number to use."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_solidgate_contraction_daily
+    description: >
+      Existing customers who started paying less but did not stop altogether, and by how
+      much. Records the decrease, not the customer's new total. Values are negative.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The day the decrease happened."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: contraction_customers
+        description: "Customers paying less than the day before."
+        data_tests:
+          - not_null
+      - name: cancellation_customers
+        description: "Of those, the ones who dropped a plan but kept at least one."
+      - name: downgrade_customers
+        description: "Of those, the ones on the same number of plans paying less."
+      - name: contraction_mrr_local
+        description: "How much less, in their own currency. Mixes currencies — rough guide only."
+      - name: contraction_mrr_usd
+        description: "How much less, in US dollars. This is the number to use. Negative."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: int_solidgate_subscription_history
+    description: >
+      Historical subscription lifecycle, one row per subscription version. Built from
+      every retained daily Release Avro file (not the upsert `subscriptions` bronze
+      table, which only ever holds the current state). A version is keyed on
+      (account_name, subscription_id, updated_at); if the same version shows up in more
+      than one file, the latest by captured_at wins. valid_from is that version's
+      updated_at, valid_to is the next version's updated_at for the same subscription —
+      null on the current version.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - account_name
+              - subscription_id
+              - updated_at
+    columns:
+      - name: account_name
+        description: "Solidgate account — the product dimension."
+        data_tests:
+          - not_null
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: status
+        description: "`active` is live, `redemption` means a payment failed and is being retried, `cancelled` and `expired` are over."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['active', 'redemption', 'cancelled', 'expired', 'pending']
+      - name: created_at
+        description: "When the subscription was created."
+      - name: updated_at
+        description: "When this version of the subscription was written. The version key, and the start of its validity period."
+        data_tests:
+          - not_null
+      - name: started_at
+        description: "When the subscription began."
+      - name: expired_at
+        description: "When the paid period ends."
+      - name: cancelled_at
+        description: "When it was cancelled, if it was."
+      - name: trial
+        description: "Whether this version was on a trial."
+      - name: payment_type
+        description: "How the subscription is paid."
+      - name: customer_id
+        description: "Solidgate customer account id."
+      - name: customer_email
+        description: "Customer's email as of this version."
+      - name: product_id
+        description: "Solidgate product id."
+      - name: product_name
+        description: "Solidgate product name."
+      - name: product_amount
+        description: "Subscription product amount, in the subscription's own currency, as of this version."
+      - name: product_currency
+        description: "Currency of product_amount."
+      - name: captured_at
+        description: "When this raw snapshot was ingested. Used only to break ties between duplicate versions, not a business timestamp."
+      - name: valid_from
+        description: "Start of this version's validity period. Equal to updated_at."
+        data_tests:
+          - not_null
+      - name: valid_to
+        description: "End of this version's validity period — the next version's updated_at for the same subscription. Null on the current version."
+
+  - name: int_solidgate_subscription_lifecycle
+    description: >
+      Where each subscription is up to: whether it is live, retrying a failed payment,
+      or over, and the dates it started, was cancelled and ended.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: status
+        description: "`active` is live, `redemption` means a payment failed and is being retried, `cancelled` and `expired` are over."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['active', 'redemption', 'cancelled', 'expired', 'pending']
+      - name: started_date
+        description: "When the subscription began."
+      - name: expired_date
+        description: "When the paid period ends. This is the day after the last day it counts towards MRR."
+      - name: cancelled_date
+        description: "When it was cancelled, if it was."
+      - name: next_charge_date
+        description: "When the next payment is due."
+
+  - name: int_solidgate_mrr_churn_daily
+    description: >
+      Customers who stopped paying us for good, and what we lost. Dated the day after
+      their last paid day. Values are negative.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The first day they were no longer paying."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: churned_customers
+        description: >
+          Customers who left that day. Leaves out anyone still on a payment retry, and
+          anyone who came back within the grace days.
+        data_tests:
+          - not_null
+      - name: churn_mrr_local
+        description: "What we lost, in their own currency. Mixes currencies — rough guide only."
+      - name: churn_mrr_usd
+        description: "What we lost, in US dollars. This is the number to use. Negative."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."
+
+  - name: solidgate_invoices_attempts
+    description: >
+      Invoice x order (payment attempt) grain, projected from
+      int_solidgate_subscription_invoice_orders for downstream retry-attempt
+      calculations. Grain: subscription_id x invoice_id x order_id.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - subscription_id
+              - invoice_id
+              - order_id
+              - _elt_account_name
+    columns:
+      - name: subscription_id
+        description: "Solidgate subscription id."
+        data_tests:
+          - not_null
+      - name: invoice_id
+        description: "Parent invoice id."
+        data_tests:
+          - not_null
+      - name: order_id
+        description: "Key of the order (payment attempt) inside the invoice's `orders` object."
+        data_tests:
+          - not_null
+      - name: retry_attempt
+        description: "Retry index; 0 is the first attempt."
+      - name: status
+        description: "settle_ok / auth_failed etc."
+      - name: operation
+        description: "pay / settle."
+      - name: _elt_account_name
+        description: "Solidgate account the record came from."
+        data_tests:
+          - not_null
+
+  - name: int_solidgate_mrr_reactivation_daily
+    description: >
+      Customers who had stopped paying and started again. Counts their whole value, not
+      the difference against what they paid before, because they left in between.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - snapshot_date
+              - _elt_account_name
+    columns:
+      - name: snapshot_date
+        description: "The day they started paying again."
+        data_tests:
+          - not_null
+      - name: _elt_account_name
+        description: "Which Solidgate account, i.e. which product."
+        data_tests:
+          - not_null
+      - name: reactivated_customers
+        description: "Customers who came back that day, after being gone longer than the grace days."
+        data_tests:
+          - not_null
+      - name: reactivation_mrr_local
+        description: "What they are worth, in their own currency. Mixes currencies — rough guide only."
+      - name: reactivation_mrr_usd
+        description: "What they are worth, in US dollars. This is the number to use."
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: customers_missing_fx
+        description: "Customers we could not convert because their currency has no exchange rate."
+      - name: missing_fx_currencies
+        description: "Which currencies were missing a rate that day."

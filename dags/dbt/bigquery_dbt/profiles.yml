@@ -1,0 +1,34 @@
+# dbt profile used by the `dbt_observability` DAG (its dbt/edr CLI tasks run with
+# `--profiles-dir` pointing here). `edr` also requires the `elementary` profile below.
+bigquery_dbt:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth          # Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS)
+      project: "{{ env_var('DBT_GCP_PROJECT') }}"
+      # Default schema = dbt_analytics (matches Cosmos ProfileConfig); silver/gold override via +schema.
+      dataset: "{{ env_var('DBT_BQ_DATASET', 'dbt_analytics') }}"
+      location: "{{ env_var('DBT_BQ_LOCATION', 'US') }}"
+      threads: "{{ env_var('DBT_THREADS', 4) | as_number }}"  # CI raises it; Airflow keeps 4
+      priority: interactive
+      job_execution_timeout_seconds: 600
+      job_retries: 1
+
+# `edr` runs Elementary's own internal dbt project, which requires a profile named `elementary`.
+# Same warehouse; `dataset` points at where the Elementary models live. This project's custom
+# generate_schema_name macro uses +schema VERBATIM, so `+schema: elementary` -> dataset `elementary`
+# (NOT <target>_elementary). Keep this in sync with dbt_project.yml's `models: elementary: +schema`.
+elementary:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: oauth
+      project: "{{ env_var('DBT_GCP_PROJECT') }}"
+      dataset: "{{ env_var('DBT_ELEMENTARY_DATASET', 'elementary') }}"
+      location: "{{ env_var('DBT_BQ_LOCATION', 'US') }}"
+      threads: 4
+      priority: interactive
+      job_execution_timeout_seconds: 600
+      job_retries: 1
