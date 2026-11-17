@@ -27,6 +27,7 @@ DBT_DAG_BRONZE_URIS = {
     "solidgate://financial/entries/bronze",
     "solidgate://financial/fraud/bronze",
     "solidgate://financial/subscriptions/bronze",
+    "paypal://transactions/bronze",
     "zendesk://financial/bronze",
     "data://bronze/anytrack/events",
     "data://bronze/files_editor_db/billing",

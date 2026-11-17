@@ -36,6 +36,7 @@ SOLIDGATE_FRAUD_ALERTS_BRONZE_DATASET = Asset("solidgate://financial/fraud/bronz
 SOLIDGATE_SUBSCRIPTIONS_BRONZE_DATASET = Asset(
     "solidgate://financial/subscriptions/bronze"
 )
+PAYPAL_TRANSACTIONS_BRONZE_DATASET = Asset("paypal://transactions/bronze")
 ZENDESK_BRONZE_DATASET = Asset("zendesk://financial/bronze")
 # anytrack_recon silver/gold models read both of these.
 ANYTRACK_BRONZE_DATASET = Asset("data://bronze/anytrack/events")
@@ -143,6 +144,7 @@ my_cosmos_dag = DbtDag(
         SOLIDGATE_FINANCIAL_ENTRIES_BRONZE_DATASET,
         SOLIDGATE_FRAUD_ALERTS_BRONZE_DATASET,
         SOLIDGATE_SUBSCRIPTIONS_BRONZE_DATASET,
+        PAYPAL_TRANSACTIONS_BRONZE_DATASET,
         ZENDESK_BRONZE_DATASET,
         ANYTRACK_BRONZE_DATASET,
         FILES_EDITOR_DB_BRONZE_DATASET,

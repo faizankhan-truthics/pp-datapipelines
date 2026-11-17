@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: int_paypal_transactions
+    description: >
+      Typed PayPal sandbox transaction records from the Transaction Search API.
+      Amounts remain in their reported transaction currencies.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - transaction_id
+              - _elt_account_name
+    columns:
+      - name: transaction_id
+        description: PayPal transaction identifier.
+        data_tests:
+          - not_null
+      - name: transaction_initiation_date
+        description: Timestamp when the transaction was initiated.
+      - name: transaction_amount
+        description: Transaction amount in transaction_currency.
+      - name: transaction_currency
+        description: ISO 4217 currency code for the transaction amount.
+      - name: _elt_account_name
+        description: PayPal account environment, fixed to paypal_sandbox for this ingestion.
+        data_tests:
+          - not_null
+      - name: _elt_update_timestamp
+        description: Timestamp when the bronze record was last merged.
+        data_tests:
+          - not_null
