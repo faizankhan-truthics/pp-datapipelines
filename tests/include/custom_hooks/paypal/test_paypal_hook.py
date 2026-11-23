@@ -78,8 +78,7 @@ def test_get_raw_pages_authenticates_and_follows_page_count(monkeypatch):
     assert requests[1][2]["params"]["balance_affecting_records_only"] == "N"
     assert requests[2][2]["params"]["page"] == 2
     assert all(
-        call[1].startswith("https://api-m.sandbox.paypal.com/")
-        for call in requests
+        call[1].startswith("https://api-m.sandbox.paypal.com/") for call in requests
     )
 
 

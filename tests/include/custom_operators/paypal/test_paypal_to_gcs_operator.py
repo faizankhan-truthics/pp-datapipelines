@@ -78,12 +78,13 @@ def test_operator_lands_page_and_releases_transaction_records(monkeypatch):
     ]
     assert result["total_records"] == 1
     assert result["release_paths"] == [
-        "release/paypal/transactions/paypal_sandbox/2026-01-01/"
-        "paypal_sandbox_transactions_00001.avro"
+        "release/paypal/transactions/sandbox/2026-01-01/sandbox_transactions_00001.avro"
     ]
 
     landing = next(
-        upload for upload in fake_gcs.uploads if upload["mime_type"] == "application/json"
+        upload
+        for upload in fake_gcs.uploads
+        if upload["mime_type"] == "application/json"
     )
     assert landing["object_name"].startswith("landing/paypal/transactions/")
 
@@ -93,6 +94,6 @@ def test_operator_lands_page_and_releases_transaction_records(monkeypatch):
         if upload["mime_type"] == "associated-avro-binary"
     )
     records = list(reader(io.BytesIO(release["data"])))
-    assert records[0]["_elt_account_name"] == "paypal_sandbox"
+    assert records[0]["_elt_account_name"] == "sandbox"
     assert records[0]["_elt_endpoint"] == "transactions"
     assert '"transaction_id": "TX-1"' in records[0]["raw_data"]

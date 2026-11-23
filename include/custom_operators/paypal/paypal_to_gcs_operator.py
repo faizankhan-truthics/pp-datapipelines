@@ -111,12 +111,8 @@ class PaypalToGCSOperator(BaseOperator):
             # preserve the Airflow interval's [start, end) boundaries.
             api_end = window_end - timedelta(milliseconds=1)
             partition = window_start.strftime("%Y-%m-%d")
-            landing_dir = (
-                f"landing/paypal/{ENDPOINT}/{ACCOUNT_NAME}/{partition}"
-            )
-            release_dir = (
-                f"release/paypal/{ENDPOINT}/{ACCOUNT_NAME}/{partition}"
-            )
+            landing_dir = f"landing/paypal/{ENDPOINT}/{ACCOUNT_NAME}/{partition}"
+            release_dir = f"release/paypal/{ENDPOINT}/{ACCOUNT_NAME}/{partition}"
             _clean_prefix(bucket, f"{landing_dir}/")
             _clean_prefix(bucket, f"{release_dir}/")
 

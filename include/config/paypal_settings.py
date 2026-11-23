@@ -7,7 +7,7 @@ from airflow.models import Variable
 BASE_URL = "https://api-m.sandbox.paypal.com"
 CLIENT_ID_ENV = "PAYPAL_SANDBOX_CLIENT_ID"
 CLIENT_SECRET_ENV = "PAYPAL_SANDBOX_CLIENT_SECRET"
-ACCOUNT_NAME = "paypal_sandbox"
+ACCOUNT_NAME = "sandbox"
 ENDPOINT = "transactions"
 PAGE_SIZE = 500
 MAX_WINDOW_DAYS = 30

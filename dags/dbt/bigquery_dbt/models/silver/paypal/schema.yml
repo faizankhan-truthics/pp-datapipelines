@@ -23,7 +23,7 @@ models:
       - name: transaction_currency
         description: ISO 4217 currency code for the transaction amount.
       - name: _elt_account_name
-        description: PayPal account environment, fixed to paypal_sandbox for this ingestion.
+        description: PayPal account environment, fixed to sandbox for this ingestion.
         data_tests:
           - not_null
       - name: _elt_update_timestamp

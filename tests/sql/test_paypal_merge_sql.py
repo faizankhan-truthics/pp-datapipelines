@@ -2,11 +2,7 @@ import re
 from pathlib import Path
 
 SQL_PATH = (
-    Path(__file__).parents[2]
-    / "include"
-    / "sql"
-    / "paypal"
-    / "merge_transactions.sql"
+    Path(__file__).parents[2] / "include" / "sql" / "paypal" / "merge_transactions.sql"
 )
 
 
