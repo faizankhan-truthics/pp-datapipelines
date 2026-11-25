@@ -1,0 +1,18 @@
+version: 2
+
+sources:
+  - name: bronze_paypal
+    database: "{{ target.project }}"
+    schema: "{{ env_var('AIRFLOW_VAR_BQ_BRONZE_DATASET') }}"
+    description: "Raw PayPal transaction tables across configured accounts and environments"
+    config:
+      tags: ["paypal", "bronze"]
+      loaded_at_field: _elt_update_timestamp
+      freshness:
+        warn_after: {count: 30, period: hour}
+        error_after: {count: 48, period: hour}
+    tables:
+      - name: paypal_transactions
+        description: >
+          Sandbox transactions from the PayPal Transaction Search API. Raw API
+          payloads are retained in the GCS landing/release layers.
