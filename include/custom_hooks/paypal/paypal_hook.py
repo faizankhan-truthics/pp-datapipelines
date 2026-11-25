@@ -1,4 +1,4 @@
-"""OAuth-authenticated requests to PayPal's sandbox Transaction Search API."""
+"""OAuth-authenticated requests to PayPal's Transaction Search API."""
 
 from __future__ import annotations
 
@@ -12,10 +12,7 @@ from airflow.exceptions import AirflowException
 from airflow.hooks.base import BaseHook
 
 from include.config.paypal_settings import (
-    ACCOUNT_NAME,
-    BASE_URL,
-    CLIENT_ID_ENV,
-    CLIENT_SECRET_ENV,
+    BASE_URLS,
     ENDPOINT,
     PAGE_SIZE,
     RATE_LIMIT_PER_SECOND,
@@ -28,24 +25,35 @@ _MAX_PAGES = 10000
 
 
 class PaypalHook(BaseHook):
-    """Fetch transaction pages from the PayPal sandbox reporting API."""
+    """Fetch transaction pages from the configured PayPal reporting environment."""
 
     def __init__(
         self,
         *,
-        client_id: str | None = None,
-        client_secret: str | None = None,
+        account_name: str,
+        environment: str,
+        client_id_env: str,
+        client_secret_env: str,
     ) -> None:
         super().__init__()
-        self.client_id = client_id or os.environ.get(CLIENT_ID_ENV)
-        self.client_secret = client_secret or os.environ.get(CLIENT_SECRET_ENV)
+        self.account_name = account_name
+        if environment not in BASE_URLS:
+            raise AirflowException(
+                f"Unsupported PayPal environment {environment!r} for account "
+                f"{account_name!r}"
+            )
+        self.environment = environment
+        self.client_id_env = client_id_env
+        self.client_secret_env = client_secret_env
+        self.client_id = os.environ.get(client_id_env)
+        self.client_secret = os.environ.get(client_secret_env)
         if not self.client_id or not self.client_secret:
             raise AirflowException(
-                f"Missing PayPal sandbox credentials: set {CLIENT_ID_ENV} and "
-                f"{CLIENT_SECRET_ENV}"
+                f"Missing PayPal credentials for account {account_name!r}: set "
+                f"{client_id_env} and {client_secret_env}"
             )
         self.session = requests.Session()
-        self.base_url = BASE_URL
+        self.base_url = BASE_URLS[environment]
         self._access_token: str | None = None
         self._token_expires_at = 0.0
 
@@ -58,7 +66,7 @@ class PaypalHook(BaseHook):
                 if attempt == _MAX_ATTEMPTS:
                     raise AirflowException(
                         f"PayPal request failed after {_MAX_ATTEMPTS} attempts "
-                        f"for account {ACCOUNT_NAME}: {exc}"
+                        f"for account {self.account_name}: {exc}"
                     ) from exc
                 self.log.warning(
                     "PayPal network error on attempt %d/%d; retrying",
@@ -71,12 +79,13 @@ class PaypalHook(BaseHook):
                 if response.status_code not in _RETRY_STATUS:
                     raise AirflowException(
                         f"PayPal returned HTTP {response.status_code} for account "
-                        f"{ACCOUNT_NAME}: {response.text[:500]}"
+                        f"{self.account_name}: {response.text[:500]}"
                     )
                 if attempt == _MAX_ATTEMPTS:
                     raise AirflowException(
                         f"PayPal request failed after {_MAX_ATTEMPTS} attempts "
-                        f"(HTTP {response.status_code}) for account {ACCOUNT_NAME}: "
+                        f"(HTTP {response.status_code}) for account "
+                        f"{self.account_name}: "
                         f"{response.text[:500]}"
                     )
                 self.log.warning(
@@ -141,7 +150,8 @@ class PaypalHook(BaseHook):
                 payload = response.json()
             except ValueError as exc:
                 raise AirflowException(
-                    "PayPal transactions response was not valid JSON"
+                    f"PayPal transactions response was not valid JSON for "
+                    f"account {self.account_name}"
                 ) from exc
 
             records = payload.get("transaction_details")

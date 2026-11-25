@@ -1,4 +1,4 @@
-{{ config(
+ {{ config(
     materialized='table',
     tags=["identity", "silver", "daily"],
 ) }}

@@ -13,7 +13,6 @@ from airflow.utils.context import Context
 from fastavro import writer
 
 from include.config.paypal_settings import (
-    ACCOUNT_NAME,
     AVRO_SCHEMA,
     ENDPOINT,
     GCP_CONN_ID,
@@ -76,24 +75,55 @@ def _clean_prefix(bucket, prefix: str) -> None:
 
 
 class PaypalToGCSOperator(BaseOperator):
-    """Fetch the configured sandbox date window and write page files to GCS."""
+    """Fetch one configured PayPal account's date window and write page files to GCS."""
 
     template_fields = ("gcs_bucket",)
+    map_index_template = "account_{{ task.account_name }}"
 
     def __init__(
         self,
         *,
+        account_name: str,
+        environment: str,
+        client_id_env: str,
+        client_secret_env: str,
         gcs_bucket: str,
         gcp_conn_id: str = GCP_CONN_ID,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
+        self.account_name = account_name
+        self.environment = environment
+        self.client_id_env = client_id_env
+        self.client_secret_env = client_secret_env
         self.gcs_bucket = gcs_bucket
         self.gcp_conn_id = gcp_conn_id
 
     def execute(self, context: Context) -> dict:
+        dag_run = context.get("dag_run")
+        conf = (getattr(dag_run, "conf", None) or {}) if dag_run else {}
+        requested_accounts = conf.get("accounts")
+        if requested_accounts and self.account_name.lower() not in {
+            name.lower() for name in requested_accounts
+        }:
+            self.log.info(
+                "Skipping account '%s' - not in conf['accounts'] allowlist: %s",
+                self.account_name,
+                requested_accounts,
+            )
+            return {
+                "landing_pages_processed": 0,
+                "total_records": 0,
+                "release_paths": [],
+            }
+
         start, end = _resolve_window(context)
-        hook = PaypalHook()
+        hook = PaypalHook(
+            account_name=self.account_name,
+            environment=self.environment,
+            client_id_env=self.client_id_env,
+            client_secret_env=self.client_secret_env,
+        )
         gcs_hook = GCSHook(gcp_conn_id=self.gcp_conn_id)
         bucket = gcs_hook.get_conn().bucket(self.gcs_bucket)
         now = datetime.now(timezone.utc).isoformat()
@@ -111,8 +141,8 @@ class PaypalToGCSOperator(BaseOperator):
             # preserve the Airflow interval's [start, end) boundaries.
             api_end = window_end - timedelta(milliseconds=1)
             partition = window_start.strftime("%Y-%m-%d")
-            landing_dir = f"landing/paypal/{ENDPOINT}/{ACCOUNT_NAME}/{partition}"
-            release_dir = f"release/paypal/{ENDPOINT}/{ACCOUNT_NAME}/{partition}"
+            landing_dir = f"landing/paypal/{ENDPOINT}/{self.account_name}/{partition}"
+            release_dir = f"release/paypal/{ENDPOINT}/{self.account_name}/{partition}"
             _clean_prefix(bucket, f"{landing_dir}/")
             _clean_prefix(bucket, f"{release_dir}/")
 
@@ -124,7 +154,7 @@ class PaypalToGCSOperator(BaseOperator):
                 start=1,
             ):
                 total_pages += 1
-                file_stem = f"{ACCOUNT_NAME}_{ENDPOINT}_{page_index:05d}"
+                file_stem = f"{self.account_name}_{ENDPOINT}_{page_index:05d}"
                 landing_path = f"{landing_dir}/{file_stem}.json"
                 release_path = f"{release_dir}/{file_stem}.avro"
                 release_uri = f"gs://{self.gcs_bucket}/{release_path}"
@@ -143,7 +173,8 @@ class PaypalToGCSOperator(BaseOperator):
                     )
                 avro_records = [
                     {
-                        "_elt_account_name": ACCOUNT_NAME,
+                        "_elt_account_name": self.account_name,
+                        "_elt_environment": self.environment,
                         "_elt_endpoint": ENDPOINT,
                         "_elt_insert_timestamp": now,
                         "_elt_update_timestamp": now,
@@ -166,8 +197,9 @@ class PaypalToGCSOperator(BaseOperator):
             window_start = window_end
 
         self.log.info(
-            "[%s] PayPal transactions: %d pages and %d records",
-            ACCOUNT_NAME,
+            "[%s] PayPal %s transactions: %d pages and %d records",
+            self.account_name,
+            self.environment,
             total_pages,
             total_records,
         )

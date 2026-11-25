@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS `{{ params.bq_project }}.{{ params.bq_bronze_dataset 
     custom_field STRING,
     protection_eligibility STRING,
     _elt_account_name STRING NOT NULL,
+    _elt_environment STRING NOT NULL,
     _elt_endpoint STRING NOT NULL,
     _elt_insert_timestamp TIMESTAMP NOT NULL,
     _elt_update_timestamp TIMESTAMP NOT NULL,
@@ -35,7 +36,8 @@ ALTER TABLE `{{ params.bq_project }}.{{ params.bq_bronze_dataset }}.paypal_trans
   ADD COLUMN IF NOT EXISTS transaction_subject STRING,
   ADD COLUMN IF NOT EXISTS invoice_id STRING,
   ADD COLUMN IF NOT EXISTS custom_field STRING,
-  ADD COLUMN IF NOT EXISTS protection_eligibility STRING;
+  ADD COLUMN IF NOT EXISTS protection_eligibility STRING,
+  ADD COLUMN IF NOT EXISTS _elt_environment STRING;
 
 MERGE `{{ params.bq_project }}.{{ params.bq_bronze_dataset }}.paypal_transactions` T
 USING (
@@ -69,6 +71,7 @@ USING (
     JSON_VALUE(jp, '$.transaction_info.custom_field') AS custom_field,
     JSON_VALUE(jp, '$.transaction_info.protection_eligibility') AS protection_eligibility,
     _elt_account_name,
+    _elt_environment,
     _elt_endpoint,
     SAFE_CAST(_elt_insert_timestamp AS TIMESTAMP) AS _elt_insert_timestamp,
     SAFE_CAST(_elt_update_timestamp AS TIMESTAMP) AS _elt_update_timestamp,
@@ -100,6 +103,7 @@ WHEN MATCHED THEN
     T.invoice_id = S.invoice_id,
     T.custom_field = S.custom_field,
     T.protection_eligibility = S.protection_eligibility,
+    T._elt_environment = S._elt_environment,
     T._elt_update_timestamp = CURRENT_TIMESTAMP(),
     T._gcs_file_path = S._gcs_file_path
 WHEN NOT MATCHED THEN
@@ -108,7 +112,7 @@ WHEN NOT MATCHED THEN
     transaction_updated_date, transaction_amount, transaction_currency,
     fee_amount, fee_currency, ending_balance, ending_balance_currency,
     transaction_status, transaction_subject, invoice_id, custom_field,
-    protection_eligibility, _elt_account_name, _elt_endpoint,
+    protection_eligibility, _elt_account_name, _elt_environment, _elt_endpoint,
     _elt_insert_timestamp, _elt_update_timestamp, _gcs_file_path
   )
   VALUES (
@@ -116,6 +120,6 @@ WHEN NOT MATCHED THEN
     S.transaction_updated_date, S.transaction_amount, S.transaction_currency,
     S.fee_amount, S.fee_currency, S.ending_balance, S.ending_balance_currency,
     S.transaction_status, S.transaction_subject, S.invoice_id, S.custom_field,
-    S.protection_eligibility, S._elt_account_name, S._elt_endpoint,
+    S.protection_eligibility, S._elt_account_name, S._elt_environment, S._elt_endpoint,
     S._elt_insert_timestamp, S._elt_update_timestamp, S._gcs_file_path
   );

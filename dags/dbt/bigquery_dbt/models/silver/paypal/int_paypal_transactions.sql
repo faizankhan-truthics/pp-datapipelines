@@ -27,6 +27,7 @@ select
     custom_field,
     protection_eligibility,
     _elt_account_name,
+    _elt_environment,
     _elt_update_timestamp
 from {{ source('bronze_paypal', 'paypal_transactions') }}
 {% if is_incremental() %}

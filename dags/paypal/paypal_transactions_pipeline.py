@@ -1,4 +1,4 @@
-"""Daily PayPal sandbox Transaction Search API ingestion to BigQuery bronze."""
+"""Daily multi-account PayPal Transaction Search API ingestion to BigQuery bronze."""
 
 from datetime import datetime
 
@@ -13,7 +13,7 @@ from airflow.providers.google.cloud.transfers.gcs_to_bigquery import (
 from airflow.sdk import Asset, task
 from airflow.utils.trigger_rule import TriggerRule
 
-from include.config.paypal_settings import GCP_CONN_ID, SQL_DIR
+from include.config.paypal_settings import GCP_CONN_ID, SQL_DIR, get_paypal_accounts
 from include.custom_operators.paypal.paypal_to_gcs_operator import (
     PaypalToGCSOperator,
 )
@@ -27,7 +27,7 @@ with DAG(
     schedule="@daily",
     catchup=False,
     default_args={"owner": "data-platform", "retries": 3, "pool": "standard_mem_pool"},
-    tags=["ingestion", "paypal", "sandbox", "bronze"],
+    tags=["ingestion", "paypal", "bronze"],
     max_active_runs=1,
     template_searchpath=[str(SQL_DIR)],
     params={
@@ -47,23 +47,42 @@ with DAG(
     BQ_STAGING_DATASET = Variable.get("BQ_STAGING_DATASET")
     BQ_BRONZE_DATASET = Variable.get("BQ_BRONZE_DATASET")
 
-    extract_transactions = PaypalToGCSOperator(
+    paypal_accounts = get_paypal_accounts()
+
+    extract_transactions = PaypalToGCSOperator.partial(
         task_id="extract_transactions",
         gcs_bucket=GCS_BUCKET_NAME,
         gcp_conn_id=GCP_CONN_ID,
-    )
+    ).expand_kwargs(paypal_accounts)
 
-    @task(trigger_rule=TriggerRule.NONE_FAILED_MIN_ONE_SUCCESS)
-    def collect_release_paths(result: dict) -> list[str]:
-        paths = result.get("release_paths", [])
+    @task(trigger_rule=TriggerRule.ALL_DONE)
+    def collect_release_paths(results: list[dict]) -> list[str]:
+        paths = [
+            path
+            for result in results
+            if result
+            for path in result.get("release_paths", [])
+        ]
         if not paths:
             raise AirflowSkipException(
-                "PayPal returned no transaction pages; skipping the BigQuery load."
+                "No PayPal accounts returned transaction pages; "
+                "skipping the BigQuery load."
             )
         directories = sorted({path.rsplit("/", 1)[0] for path in paths})
         return [f"{directory}/*.avro" for directory in directories]
 
     release_paths = collect_release_paths(extract_transactions.output)
+
+    @task(trigger_rule=TriggerRule.ONE_FAILED)
+    def account_ingest_failure_watcher():
+        from airflow.sdk.exceptions import AirflowFailException
+
+        raise AirflowFailException(
+            "One or more PayPal account ingests failed; bronze was refreshed "
+            "for the remaining accounts only."
+        )
+
+    extract_transactions >> account_ingest_failure_watcher()
 
     load_staging = GCSToBigQueryOperator(
         task_id="load_staging",

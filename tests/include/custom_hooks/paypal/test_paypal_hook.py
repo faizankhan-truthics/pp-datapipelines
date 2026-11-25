@@ -30,7 +30,14 @@ def _disable_waits(monkeypatch):
 
 def test_get_raw_pages_authenticates_and_follows_page_count(monkeypatch):
     _disable_waits(monkeypatch)
-    hook = PaypalHook(client_id="sandbox-id", client_secret="sandbox-secret")
+    monkeypatch.setenv("PAYPAL_CLIENT_ID_SANDBOX", "sandbox-id")
+    monkeypatch.setenv("PAYPAL_CLIENT_SECRET_SANDBOX", "sandbox-secret")
+    hook = PaypalHook(
+        account_name="sandbox",
+        environment="sandbox",
+        client_id_env="PAYPAL_CLIENT_ID_SANDBOX",
+        client_secret_env="PAYPAL_CLIENT_SECRET_SANDBOX",
+    )
     requests = []
     responses = iter(
         [
@@ -83,8 +90,27 @@ def test_get_raw_pages_authenticates_and_follows_page_count(monkeypatch):
 
 
 def test_missing_sandbox_credentials_fail_explicitly(monkeypatch):
-    monkeypatch.delenv("PAYPAL_SANDBOX_CLIENT_ID", raising=False)
-    monkeypatch.delenv("PAYPAL_SANDBOX_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("PAYPAL_CLIENT_ID_MISSING", raising=False)
+    monkeypatch.delenv("PAYPAL_CLIENT_SECRET_MISSING", raising=False)
 
-    with pytest.raises(AirflowException, match="Missing PayPal sandbox credentials"):
-        PaypalHook()
+    with pytest.raises(AirflowException, match="Missing PayPal credentials"):
+        PaypalHook(
+            account_name="missing",
+            environment="sandbox",
+            client_id_env="PAYPAL_CLIENT_ID_MISSING",
+            client_secret_env="PAYPAL_CLIENT_SECRET_MISSING",
+        )
+
+
+def test_production_account_uses_production_api_host(monkeypatch):
+    monkeypatch.setenv("PAYPAL_CLIENT_ID_PROD", "production-id")
+    monkeypatch.setenv("PAYPAL_CLIENT_SECRET_PROD", "production-secret")
+
+    hook = PaypalHook(
+        account_name="prod",
+        environment="production",
+        client_id_env="PAYPAL_CLIENT_ID_PROD",
+        client_secret_env="PAYPAL_CLIENT_SECRET_PROD",
+    )
+
+    assert hook.base_url == "https://api-m.paypal.com"
